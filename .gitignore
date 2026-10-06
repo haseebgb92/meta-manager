@@ -31,3 +31,5 @@ mm-research-result.png
 public-content-review.mp4
 src-tauri/resources/meta-manager-mcp.cjs
 windows-build-*/
+web/.vercel/
+docs/screenshots/*-web.jpg
