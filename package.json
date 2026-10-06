@@ -1,0 +1,41 @@
+{
+  "name": "meta-manager",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "desktop": "tauri dev",
+    "desktop:build": "tauri build",
+    "mcp": "node mcp/server.mjs",
+    "mcp:bundle": "esbuild mcp/server.mjs --bundle --platform=node --format=cjs --target=node22 --outfile=src-tauri/resources/meta-manager-mcp.cjs",
+    "build:all": "npm run build && npm run mcp:bundle",
+    "windows:prepare-node": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-windows-node.ps1",
+    "windows:build": "npm run windows:prepare-node && tauri build --bundles nsis"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "@tauri-apps/api": "^2.12.1",
+    "@tauri-apps/plugin-opener": "^2.7.0",
+    "express": "^5.2.1",
+    "lucide-react": "^1.52.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.1",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "esbuild": "^0.28.2",
+    "oxlint": "^1.81.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0"
+  }
+}

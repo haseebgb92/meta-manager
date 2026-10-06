@@ -1,0 +1,38 @@
+[package]
+name = "meta-manager"
+version = "0.1.11"
+description = "Local-first Meta social publishing and analytics manager"
+authors = ["Advertpreneur"]
+license = ""
+repository = ""
+edition = "2024"
+rust-version = "1.90"
+
+[lib]
+name = "meta_manager_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.1", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.12.1", features = [] }
+tauri-plugin-log = "2"
+rusqlite = { version = "0.32", features = ["bundled"] }
+uuid = { version = "1.11", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+tauri-plugin-opener = "2"
+
+urlencoding = "2.1"
+ureq = { version = "2.12", features = ["json"] }
+keyring = "3"
+tiny_http = "0.12"
+url = "2.5"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pemfile = "2.2"
+
+[target.'cfg(windows)'.dependencies]
+rcgen = { version = "0.14.10", features = ["pem"] }
