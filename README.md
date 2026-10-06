@@ -5,6 +5,10 @@
 Meta Manager brings account connections, publishing, scheduling, media, analytics, and research into one desktop workspace. It is built with **Tauri + React + Rust**, keeps social account tokens on the user's machine, and uses a small secure OAuth broker so new installations never need provider App Secrets.
 
 > Current release: **v0.1.11** — Linux + Windows
+>
+> Product page: **https://advertpreneur.com/meta-manager/**
+>
+> Release: **https://github.com/haseebgb92/meta-manager/releases/tag/v0.1.11**
 
 ![Meta Manager overview](docs/screenshots/overview.png)
 
