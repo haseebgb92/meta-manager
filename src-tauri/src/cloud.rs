@@ -43,7 +43,8 @@ fn cloud_secret(app:&AppHandle,name:&str)->Result<String,String>{
 fn parse_response(response: Result<ureq::Response, ureq::Error>) -> Result<Value,String> {
     match response {
         Ok(reply) => reply.into_json::<Value>().map_err(|_| "Cloud returned an invalid response".into()),
-        Err(ureq::Error::Status(code, _)) => Err(format!("Cloud returned HTTP {code}. Check your sign-in, media and account permissions.")),
+        Err(ureq::Error::Status(403, _)) => Err("This one-time email link has expired or was already used. Click Connect Cloud to use your existing social account instead.".into()),
+        Err(ureq::Error::Status(code, _)) => Err(format!("Cloud request failed (HTTP {code}). You may need to reconnect the selected social account.")),
         Err(e) => Err(format!("Could not reach cloud: {e}"))
     }
 }
@@ -56,9 +57,54 @@ fn auth_post(url:&str, body: Value) -> Result<Value,String> {
 pub fn status(app:&AppHandle)->CloudStatus {
     CloudStatus {
         signed_in:cloud_secret(app,ACCESS).is_ok_and(|token| token!="signed_out"),
-        email:db::get_setting(app,EMAIL).ok().flatten().unwrap_or_default()
+        email:db::get_setting(app,"mm_cloud_identity_label").ok().flatten()
+          .filter(|value|!value.is_empty())
+          .or_else(||db::get_setting(app,EMAIL).ok().flatten())
+          .unwrap_or_default()
     }
 }
+pub fn connect_existing(app:&AppHandle)->Result<CloudStatus,String>{
+    // Preferred: the user's own LinkedIn profile (OIDC identity).
+    // Fallback: an already authorized Instagram account, then Facebook Page.
+    let mut selected:Option<(String,String,String,String,String)>=None;
+    for member in db::list_linkedin_accounts(app)? {
+        let secret=format!("linkedin_member_token_{}",member.member_id);
+        if meta::has_secret(app,&secret) {
+            selected=Some(("linkedin".into(),member.id,member.member_id,secret,member.name));
+            break;
+        }
+    }
+    if selected.is_none(){
+        for account in db::list_accounts(app)? {
+            if let Some(ig)=account.instagram_account_id.clone() {
+                let secret=format!("instagram_direct_token_{ig}");
+                if meta::has_secret(app,&secret) {
+                    selected=Some(("instagram".into(),account.id,ig,secret,account.name));
+                    break;
+                }
+            }
+        }
+    }
+    let (provider,account_id,remote_id,secret,account_name)=selected
+      .ok_or("Connect a LinkedIn profile or direct Instagram account first, or choose Email Sign-in below")?;
+    let access=meta::load_secret(app,&secret)?;
+    let data=parse_response(ureq::post(FUNCTION)
+      .timeout(std::time::Duration::from_secs(30))
+      .set("Content-Type","application/json")
+      .send_json(json!({
+        "action":"connect_social","provider":provider,
+        "accountId":account_id,"remoteAccountId":remote_id,"token":access
+      })))?;
+    let session=data["session"].as_str().ok_or("Cloud did not return a valid session")?;
+    if !session.starts_with("mmc_") || session.len()!=68 {
+      return Err("Cloud returned an invalid account session".into());
+    }
+    meta::save_secret(app,ACCESS,session)?;
+    meta::save_secret(app,REFRESH,"signed_out")?;
+    db::set_setting(app,"mm_cloud_identity_label",&format!("{account_name} ({provider})"))?;
+    Ok(status(app))
+}
+
 pub fn send_code(app:&AppHandle,email:String)->Result<(),String>{
     let email=email.trim().to_lowercase();
     if !email.contains('@') || email.len()>200 {return Err("Enter your email address".into());}
@@ -91,6 +137,7 @@ pub fn verify_code(app:&AppHandle,email:String,code:String)->Result<CloudStatus,
     meta::save_secret(app,ACCESS,access)?;
     meta::save_secret(app,REFRESH,refresh)?;
     db::set_setting(app,EMAIL,&email)?;
+    db::set_setting(app,"mm_cloud_identity_label","")?;
     Ok(status(app))
 }
 fn refresh_session(app:&AppHandle)->Result<String,String>{
@@ -113,6 +160,8 @@ fn signed_cloud_call(app:&AppHandle,body:Value)->Result<Value,String>{
         .send_json(body.clone())
     };
     match request(&token){
+        Err(ureq::Error::Status(401,_)) if token.starts_with("mmc_") =>
+            Err("Cloud session expired. Connect Cloud again using your linked social account.".into()),
         Err(ureq::Error::Status(401,_))=>parse_response(request(&refresh_session(app)?)),
         other=>parse_response(other)
     }
@@ -241,8 +290,10 @@ pub fn upload_media(app:&AppHandle,base64_data:String)->Result<hosting::HostedMe
 }
 pub fn logout(app:&AppHandle)->Result<(),String>{
     // Replace stored credentials with revoked markers; never expose tokens.
+    let _=signed_cloud_call(app,json!({"action":"sign_out"}));
     meta::save_secret(app,ACCESS,"signed_out")?;
     meta::save_secret(app,REFRESH,"signed_out")?;
     db::set_setting(app,EMAIL,"")?;
+    db::set_setting(app,"mm_cloud_identity_label","")?;
     Ok(())
 }

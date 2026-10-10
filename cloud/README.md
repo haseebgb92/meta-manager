@@ -3,18 +3,18 @@
 The existing Vercel authentication service remains in place. The always-on posting queue runs in the already active Supabase Free project, without creating a new paid project.
 
 ## Architecture
-- Edge Function: meta-manager-cloud, verified by JWT for users or a Vault-backed secret for the internal worker.
+- Edge Function: meta-manager-cloud, verified by one-click social-account sessions or legacy Supabase JWTs for users, and a Vault-backed secret for the internal worker. Sessions are random, hashed and revocable (60 days).
 - Queue: public.mm_cloud_posts with RLS enabled and no anon/authenticated table access.
 - Publishing credentials: encrypted using pgcrypto and a key stored in Supabase Vault, accessible only through restricted service-role RPCs.
 - Image hosting: public mm-public-media storage bucket, with per-user authenticated upload access and 10 MB file limit.
 - Worker: pg_cron every minute invokes an Edge Function via pg_net. Claims are atomic. Uncertain publishing outcomes are marked needs_review rather than blindly retried.
 
 ## Setup
-1. Install Meta Manager v0.1.14.
-2. Settings → Cloud Publishing → Email sign-in. Copy the email link without opening it, then paste it into the app's verification field. A six-digit code also works if the Supabase email template supports OTP.
-3. Click Enable for each Facebook, Instagram or LinkedIn account you explicitly authorize for cloud publishing. Other tokens stay on the computer.
-4. In the composer, select free Cloud Scheduler. Uploaded JPEG images receive public Supabase HTTPS URLs.
-5. Refresh cloud queue for results. Revoke removes a provider's encrypted credentials and cancels pending jobs. Signing out only removes the desktop session.
+1. Install Meta Manager v0.1.15 and connect a personal LinkedIn account or direct Instagram login as usual.
+2. Settings → Cloud Publishing → **Connect Cloud**. The existing social token is verified with that platform, and a cloud session is created immediately. This first connected account is enabled for encrypted cloud publishing by your click; other networks remain local until explicitly enabled. **No personal Supabase account or email link is required.**
+3. In the composer, select free Cloud Scheduler. Uploaded JPEG images receive public Supabase HTTPS URLs.
+4. Refresh cloud queue for results. Revoke removes a provider's encrypted credentials and cancels pending jobs. Sign Out also revokes this device's cloud session. For accounts without eligible social login, an optional email fallback remains hidden under **Use email instead**.
+
 
 ChatGPT MCP supports cloud_status, list_cloud_posts, schedule_cloud_post, create_cloud_post and upload_cloud_media. Publishing and uploading through MCP require explicit confirm=true.
 

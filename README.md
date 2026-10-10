@@ -207,3 +207,7 @@ The media library attachment is public. Use a site you administer. Keep a separa
 ## Free Cloud Publishing (v0.1.14)
 
 Meta Manager supports an optional, free, minute-level publishing worker in the existing Supabase Free project. It is opt-in for each social account, uses encrypted credentials in Supabase Vault-backed PostgreSQL, and hosts images in Supabase Storage. No upgrade or paid add-on is required. The existing Vercel OAuth broker remains unchanged. Read cloud/README.md for setup, limits and how to revoke connections.
+
+## One-click Cloud Connect (v0.1.15)
+
+Cloud sign-in now uses a connected LinkedIn or Instagram profile. No Supabase email magic-link is needed. One click verifies the social account and grants publishing access for that selected account only. Other accounts stay local until enabled. Cloud sessions are random, hashed server-side, expire after 60 days, and can be revoked when signing out. Email sign-in is available as a hidden fallback.

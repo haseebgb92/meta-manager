@@ -363,7 +363,10 @@ async function cloudCall(body){
   body:JSON.stringify(body),signal:AbortSignal.timeout(25000)
  });
  let response=await send(token);
- if(response.status===401){token=await refreshCloudSession();response=await send(token);}
+ if(response.status===401){
+  if(token.startsWith("mmc_")) throw new Error("Cloud session expired — reconnect in Settings.");
+  token=await refreshCloudSession();response=await send(token);
+ }
  const result=await response.json();
  if(!response.ok)throw new Error(typeof result.error==="string"?result.error:"Cloud request failed");
  return result;
@@ -435,7 +438,10 @@ async function uploadCloudFile(filePath){
   "Content-Type":"image/jpeg","Authorization":"Bearer "+token,"apikey":CLOUD_PUBLIC_KEY,"x-upsert":"false"
  },body:bytes,signal:AbortSignal.timeout(45000)});
  let response=await send(readSecret("mm_cloud_access_token"));
- if(response.status===401)response=await send(await refreshCloudSession());
+ if(response.status===401){
+  if(readSecret("mm_cloud_access_token").startsWith("mmc_")) throw new Error("Reconnect Cloud in Settings.");
+  response=await send(await refreshCloudSession());
+ }
  if(!response.ok)throw new Error("Cloud image upload failed HTTP "+response.status);
  return {mediaUrl:CLOUD_ROOT+"/storage/v1/object/public/mm-public-media/"+storagePath,
   note:"JPEG uploaded to free cloud storage",size:bytes.length};

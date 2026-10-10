@@ -22,7 +22,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import {
-  getCloudStatus, cloudSendCode, cloudVerifyCode, cloudConnectAccount,
+  getCloudStatus, cloudSendCode, cloudVerifyCode, cloudConnectExisting, cloudConnectAccount,
   cloudScheduleItem, cloudListPosts, cloudUploadMedia, cloudLogout, cloudDisconnectAccount,
   type CloudStatus, type CloudPost,
 } from "./cloudApi";
@@ -189,6 +189,7 @@ function App() {
   const [cloudCode, setCloudCode] = useState("");
   const [cloudMessage, setCloudMessage] = useState("");
   const [cloudBusy, setCloudBusy] = useState(false);
+  const [showCloudEmailFallback, setShowCloudEmailFallback] = useState(false);
   const [cloudMode, setCloudMode] = useState(true);
   const [cloudPosts, setCloudPosts] = useState<CloudPost[]>([]);
 
@@ -534,6 +535,23 @@ function App() {
     }
   }
 
+  async function handleConnectCloud() {
+    setCloudBusy(true);
+    setCloudMessage("");
+    try {
+      const connected = await cloudConnectExisting();
+      setCloudStatus(connected);
+      setCloudEmail(connected.email);
+      setCloudCode("");
+      setShowCloudEmailFallback(false);
+      setCloudMessage("Cloud connected. Your linked social account is ready for scheduled posts.");
+      void cloudListPosts().then(setCloudPosts).catch(() => null);
+    } catch (error) {
+      setCloudMessage(String(error));
+    } finally {
+      setCloudBusy(false);
+    }
+  }
   async function sendCloudCode() {
     setCloudBusy(true); setCloudMessage("");
     try {
@@ -1068,12 +1086,21 @@ function App() {
             <div className="page-title-row"><div><span className="eyebrow">LOCAL CONFIGURATION</span><h2>Settings</h2><p>Meta connection, local storage and publishing service status.</p></div></div>
             <div className="settings-grid"><article className="card settings-card"><h3>Meta / Facebook</h3><div><span>App ID</span><code>{metaConfig?.appId ?? "1079289208340048"}</code></div><div><span>Credential source</span><b>Managed securely by backend</b></div><div><span>Graph version</span><code>{metaConfig?.apiVersion ?? "v23.0"}</code></div><small className="settings-help">No App Secret setup is required on this computer. Install Meta Manager anywhere and connect accounts with OAuth.</small></article><article className="card settings-card linkedin-settings"><h3>Instagram Professional</h3><div><span>Connection type</span><b>Direct Instagram Login</b></div><div><span>Instagram App ID</span><code>{instagramStatus?.appId ?? "2228119617760136"}</code></div><div><span>Credential source</span><b>Managed securely by backend</b></div><div><span>OAuth callback</span><code>{instagramStatus?.redirectUri ?? "https://127.0.0.1:38937/oauth/instagram/callback"}</code></div><div className="linkedin-actions"><button className="linkedin-connect" onClick={handleConnectInstagram}>{connectingInstagram ? "Open Instagram login" : "Connect Instagram"}</button></div>{instagramMessage ? <p className="setup-message linkedin-message">{instagramMessage}</p> : null}<small className="settings-help">No Instagram App Secret is stored in the desktop installation.</small></article><article className="card settings-card linkedin-settings"><h3>LinkedIn</h3><div><span>Personal posting app</span><b>Advertpreneur Social Manager</b></div><div><span>Client ID</span><code>{linkedInStatus?.personalClientId ?? "77drthb7h6mp7m"}</code></div><div><span>Credential source</span><b>Managed securely by backend</b></div><div><span>OAuth callback</span><code>{linkedInStatus?.personalRedirectUri ?? "http://127.0.0.1:38937/oauth/linkedin/callback"}</code></div><div className="linkedin-actions"><button className="linkedin-connect" onClick={handleConnectLinkedIn}>{connectingLinkedIn ? "Restart connection" : "Connect personal account"}</button></div>{linkedInMessage ? <p className="setup-message linkedin-message">{linkedInMessage}</p> : null}<div className="linkedin-member-list">{(linkedInStatus?.accounts ?? []).map((account)=><div key={account.id}><span className="linkedin-avatar">{account.pictureUrl ? <img src={account.pictureUrl} alt=""/> : initials(account.name)}</span><span><b>{account.name}</b><small>{account.email || "LinkedIn member"}</small></span><em>Connected</em></div>)}{!(linkedInStatus?.accounts.length) ? <small>No personal LinkedIn accounts connected yet.</small> : null}</div><hr/><div><span>Company Page app</span><b>Advertpreneur Page Publishing</b></div><div><span>Company client ID</span><code>{linkedInStatus?.companyClientId ?? "77uxxsydc367ll"}</code></div><div><span>Associated Page</span><b>{linkedInStatus?.companyPage ?? "advertpreneur"}</b></div><div><span>Community Management</span><b className="status-pending">Awaiting approval</b></div><small className="settings-help">Company Page publishing stays feature-gated until LinkedIn approves Community Management API access.</small></article><article className="card settings-card cloud-settings">
               <h3>Cloud Publishing — Free</h3>
-              <p>Uses the existing Supabase Free project. Posts publish through the minute-level cloud worker even when this computer is offline. No existing accounts are transferred automatically.</p>
+              <p>Schedule posts when your computer is off. Connect using an existing social account — no separate Supabase setup required.</p>
               {!cloudStatus?.signedIn ? <>
-                <label><span>Email sign-in</span><input type="email" value={cloudEmail} onChange={(e)=>setCloudEmail(e.target.value)} placeholder="Email address" /></label>
-                <button className="primary-page-button" disabled={cloudBusy || !cloudEmail.includes("@")} onClick={()=>void sendCloudCode()}>Email a verification code</button>
-                <label><span>Verification code or email link</span><input inputMode="numeric" value={cloudCode} onChange={(e)=>setCloudCode(e.target.value)} placeholder="Paste email sign-in URL or 6-digit code" /></label>
-                <button className="secondary-page-button" disabled={cloudBusy || !cloudCode.trim()} onClick={()=>void verifyCloudCode()}>Verify email and sign in</button>
+                <button className="primary-page-button" disabled={cloudBusy} onClick={()=>void handleConnectCloud()}>
+                  {cloudBusy ? "Connecting…" : "Connect Cloud"}
+                </button>
+                <small className="settings-help">Uses your connected LinkedIn profile or Instagram login. The selected account is enabled for secure cloud publishing; other accounts stay local until you enable them.</small>
+                <button className="cloud-email-link" onClick={()=>setShowCloudEmailFallback(!showCloudEmailFallback)}>
+                  {showCloudEmailFallback ? "Hide email sign-in" : "Use email instead"}
+                </button>
+                {showCloudEmailFallback ? <div className="cloud-email-fallback">
+                  <label><span>Email</span><input type="email" value={cloudEmail} onChange={(e)=>setCloudEmail(e.target.value)} placeholder="Email address" /></label>
+                  <button className="secondary-page-button" disabled={cloudBusy || !cloudEmail.includes("@")} onClick={()=>void sendCloudCode()}>Send login email</button>
+                  <label><span>One-time code or unused link</span><input value={cloudCode} onChange={(e)=>setCloudCode(e.target.value)} placeholder="Code or link" /></label>
+                  <button className="secondary-page-button" disabled={cloudBusy || !cloudCode.trim()} onClick={()=>void verifyCloudCode()}>Verify email</button>
+                </div> : null}
               </> : <>
                 <div><span>Signed in</span><b>{cloudStatus.email}</b></div>
                 <p>Enable each account explicitly. This stores an encrypted publishing token on the cloud backend so the scheduler works while the desktop is closed.</p>
@@ -1095,7 +1122,7 @@ function App() {
                 <button className="secondary-page-button" disabled={cloudBusy} onClick={()=>void signOutCloud()}>Sign out on this computer</button>
               </>}
               {cloudMessage?<p className="setup-message">{cloudMessage}</p>:null}
-              <small className="settings-help">Free-tier safeguards: 200 pending posts maximum per account, 10 MB images, and no paid plan required. Verify provider permissions before scheduling.</small>
+              <small className="settings-help">Uses our existing free backend. Images up to 10 MB, 200 pending posts per user, and no paid account required.</small>
             </article><article className="card settings-card">
               <h3>Media Hosting — WordPress</h3>
               <p>Automatically upload local images and generate an Instagram-compatible public URL.</p>

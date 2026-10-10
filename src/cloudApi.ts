@@ -7,6 +7,7 @@ export type CloudPost = {
   publishedRemoteId:string|null;
 };
 export const getCloudStatus=()=>invoke<CloudStatus>("get_cloud_status");
+export const cloudConnectExisting=()=>invoke<CloudStatus>("cloud_connect_existing");
 export const cloudSendCode=(email:string)=>invoke<void>("cloud_send_code",{email});
 export const cloudVerifyCode=(email:string,code:string)=>invoke<CloudStatus>("cloud_verify_code",{email,code});
 export const cloudConnectAccount=(accountId:string,provider:"facebook"|"instagram"|"linkedin")=>

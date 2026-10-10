@@ -124,3 +124,7 @@ button{border:0;background:none;color:inherit;cursor:pointer}
 .cloud-schedule-option input[type=checkbox]{width:16px;height:16px;flex:none;accent-color:#5876ea}
 
 .cloud-account-actions{display:grid;grid-template-columns:1fr auto;gap:6px}.cloud-account-actions button:last-child{color:#b05b63;background:#fff3f3}
+
+.cloud-email-link{background:none;color:#7285a8;font-size:10px;text-decoration:underline;text-underline-offset:3px;padding:5px 0;cursor:pointer;justify-self:start}
+.cloud-email-fallback{display:grid;gap:10px;margin-top:8px;padding-top:12px;border-top:1px solid #e6eaf1}
+.cloud-settings > .primary-page-button{justify-content:center;width:100%;margin:12px 0}

@@ -178,6 +178,12 @@ async fn research_public_meta(
 
 #[tauri::command]
 fn get_cloud_status(app: tauri::AppHandle) -> cloud::CloudStatus { cloud::status(&app) }
+#[tauri::command]
+async fn cloud_connect_existing(app: tauri::AppHandle)->Result<cloud::CloudStatus,String>{
+ tauri::async_runtime::spawn_blocking(move||cloud::connect_existing(&app))
+   .await.map_err(|e|e.to_string())?
+}
+
 
 #[tauri::command]
 async fn cloud_send_code(app: tauri::AppHandle,email:String)->Result<(),String>{
@@ -323,6 +329,7 @@ pub fn run() {
             configure_media_host,
             upload_hosted_media,
             get_cloud_status,
+            cloud_connect_existing,
             cloud_send_code,
             cloud_verify_code,
             cloud_connect_account,
