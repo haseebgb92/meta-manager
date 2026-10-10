@@ -1,5 +1,6 @@
 mod db;
 mod instagram;
+mod hosting;
 mod linkedin;
 mod meta;
 mod oauth;
@@ -175,6 +176,31 @@ async fn research_public_meta(
 }
 
 #[tauri::command]
+fn get_media_host_status(app: tauri::AppHandle) -> Result<hosting::MediaHostStatus, String> {
+    hosting::status(&app)
+}
+
+#[tauri::command]
+fn configure_media_host(
+    app: tauri::AppHandle,
+    site_url: String,
+    username: String,
+    application_password: Option<String>,
+) -> Result<hosting::MediaHostStatus, String> {
+    hosting::configure(&app, site_url, username, application_password)
+}
+
+#[tauri::command]
+async fn upload_hosted_media(
+    app: tauri::AppHandle,
+    base64_data: String,
+    filename: String,
+) -> Result<hosting::HostedMedia, String> {
+    tauri::async_runtime::spawn_blocking(move || hosting::upload_image(&app, base64_data, filename))
+        .await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn publish_calendar_item(
     app: tauri::AppHandle,
     item_id: String,
@@ -258,6 +284,9 @@ pub fn run() {
             get_media_library,
             research_public_meta,
             publish_calendar_item,
+            get_media_host_status,
+            configure_media_host,
+            upload_hosted_media,
             get_live_insights,
             get_mcp_status,
             refresh_meta_accounts

@@ -12,7 +12,7 @@
     "desktop": "tauri dev",
     "desktop:build": "tauri build",
     "mcp": "node mcp/server.mjs",
-    "mcp:bundle": "esbuild mcp/server.mjs --bundle --platform=node --format=cjs --target=node22 --outfile=src-tauri/resources/meta-manager-mcp.cjs",
+    "mcp:bundle": "esbuild mcp/server.mjs --bundle --platform=node --format=cjs --target=node22 --outfile=src-tauri/resources/meta-manager-mcp.cjs && esbuild mcp/proxy.mjs --bundle --platform=node --format=cjs --target=node22 --outfile=src-tauri/resources/meta-manager-proxy.cjs",
     "build:all": "npm run build && npm run mcp:bundle",
     "windows:prepare-node": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-windows-node.ps1",
     "windows:build": "npm run windows:prepare-node && tauri build --bundles nsis"

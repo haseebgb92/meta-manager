@@ -33,3 +33,5 @@ src-tauri/resources/meta-manager-mcp.cjs
 windows-build-*/
 web/.vercel/
 docs/screenshots/*-web.jpg
+
+src-tauri/resources/meta-manager-proxy.cjs

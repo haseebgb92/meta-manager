@@ -184,6 +184,33 @@ export async function getLiveInsights(accountId?: string | null, days = 28): Pro
   return invoke<LiveInsights>("get_live_insights", { accountId: accountId ?? null, days });
 }
 
+export type MediaHostStatus = {
+  siteUrl: string;
+  username: string;
+  configured: boolean;
+};
+
+export type HostedMedia = {
+  url: string;
+  mediaId: number | null;
+  verifiedPublic: boolean;
+  note: string;
+};
+
+export async function getMediaHostStatus(): Promise<MediaHostStatus> {
+  return invoke<MediaHostStatus>("get_media_host_status");
+}
+
+export async function configureMediaHost(siteUrl: string, username: string, applicationPassword: string): Promise<MediaHostStatus> {
+  return invoke<MediaHostStatus>("configure_media_host", {
+    siteUrl, username, applicationPassword: applicationPassword || null,
+  });
+}
+
+export async function uploadHostedMedia(base64Data: string, filename: string): Promise<HostedMedia> {
+  return invoke<HostedMedia>("upload_hosted_media", { base64Data, filename });
+}
+
 export type McpStatus = { online: boolean; endpoint: string };
 export async function getMcpStatus(): Promise<McpStatus | null> {
   if (!isDesktop()) return null;

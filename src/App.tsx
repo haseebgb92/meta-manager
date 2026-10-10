@@ -23,6 +23,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import {
   createAccount,
+  configureMediaHost,
+  getMediaHostStatus,
+  uploadHostedMedia,
   cancelSocialOAuth,
   getAccounts,
   getCalendar,
@@ -54,6 +57,7 @@ import {
   type MetaConfigStatus,
   type McpStatus,
   type MediaLibrary,
+  type MediaHostStatus,
   type LinkedInStatus,
   type InstagramStatus,
   type PublicMetaResearch,
@@ -167,6 +171,13 @@ function App() {
   const [composerHashtags, setComposerHashtags] = useState("");
   const [composerMediaUrl, setComposerMediaUrl] = useState("");
   const [composerLinkUrl, setComposerLinkUrl] = useState("");
+  const [mediaHostStatus, setMediaHostStatus] = useState<MediaHostStatus | null>(null);
+  const [mediaHostUrl, setMediaHostUrl] = useState("");
+  const [mediaHostUser, setMediaHostUser] = useState("");
+  const [mediaHostPassword, setMediaHostPassword] = useState("");
+  const [mediaHostMessage, setMediaHostMessage] = useState("");
+  const [savingMediaHost, setSavingMediaHost] = useState(false);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
   const [publishingId, setPublishingId] = useState<string | null>(null);
   const [savingComposer, setSavingComposer] = useState(false);
   const [composerMessage, setComposerMessage] = useState("");
@@ -206,6 +217,11 @@ function App() {
     }).catch(() => null);
     getLinkedInStatus().then(setLinkedInStatus).catch(() => null);
     getInstagramStatus().then(setInstagramStatus).catch(() => null);
+    getMediaHostStatus().then((host) => {
+      setMediaHostStatus(host);
+      setMediaHostUrl(host.siteUrl);
+      setMediaHostUser(host.username);
+    }).catch(() => null);
 
     let unlistenComplete: (() => void) | undefined;
     let unlistenError: (() => void) | undefined;
@@ -497,6 +513,63 @@ function App() {
       setCalendarItems(refreshed);
     } finally {
       setPublishingId(null);
+    }
+  }
+
+  async function handleSaveMediaHost() {
+    if (savingMediaHost) return;
+    setSavingMediaHost(true);
+    setMediaHostMessage("");
+    try {
+      const host = await configureMediaHost(mediaHostUrl, mediaHostUser, mediaHostPassword);
+      setMediaHostStatus(host);
+      setMediaHostPassword("");
+      setMediaHostMessage("Media host saved. You can now select images in the composer.");
+    } catch (error) {
+      setMediaHostMessage(String(error));
+    } finally {
+      setSavingMediaHost(false);
+    }
+  }
+
+  async function handleLocalImage(file?: File) {
+    if (!file || uploadingMedia) return;
+    if (file.size > 10 * 1024 * 1024) {
+      setComposerMessage("Maximum image size is 10 MB.");
+      return;
+    }
+    if (!mediaHostStatus?.configured) {
+      setComposerMessage("Configure WordPress Media Hosting in Settings first.");
+      return;
+    }
+    setUploadingMedia(true);
+    setComposerMessage("");
+    const objectUrl = URL.createObjectURL(file);
+    try {
+      const img = document.createElement("img");
+      img.src = objectUrl;
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("Unable to read selected image"));
+      });
+      const scale = Math.min(1, 1440 / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Could not prepare image");
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const base64Data = canvas.toDataURL("image/jpeg", 0.87).split(",")[1];
+      const uploaded = await uploadHostedMedia(base64Data, file.name);
+      setComposerMediaUrl(uploaded.url);
+      setComposerMessage(uploaded.note);
+    } catch (error) {
+      setComposerMessage(String(error));
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+      setUploadingMedia(false);
     }
   }
 
@@ -924,7 +997,17 @@ function App() {
         {activeNav === "Settings" && (
           <section className="page-panel">
             <div className="page-title-row"><div><span className="eyebrow">LOCAL CONFIGURATION</span><h2>Settings</h2><p>Meta connection, local storage and publishing service status.</p></div></div>
-            <div className="settings-grid"><article className="card settings-card"><h3>Meta / Facebook</h3><div><span>App ID</span><code>{metaConfig?.appId ?? "1079289208340048"}</code></div><div><span>Credential source</span><b>Managed securely by backend</b></div><div><span>Graph version</span><code>{metaConfig?.apiVersion ?? "v23.0"}</code></div><small className="settings-help">No App Secret setup is required on this computer. Install Meta Manager anywhere and connect accounts with OAuth.</small></article><article className="card settings-card linkedin-settings"><h3>Instagram Professional</h3><div><span>Connection type</span><b>Direct Instagram Login</b></div><div><span>Instagram App ID</span><code>{instagramStatus?.appId ?? "2228119617760136"}</code></div><div><span>Credential source</span><b>Managed securely by backend</b></div><div><span>OAuth callback</span><code>{instagramStatus?.redirectUri ?? "https://127.0.0.1:38937/oauth/instagram/callback"}</code></div><div className="linkedin-actions"><button className="linkedin-connect" onClick={handleConnectInstagram}>{connectingInstagram ? "Open Instagram login" : "Connect Instagram"}</button></div>{instagramMessage ? <p className="setup-message linkedin-message">{instagramMessage}</p> : null}<small className="settings-help">No Instagram App Secret is stored in the desktop installation.</small></article><article className="card settings-card linkedin-settings"><h3>LinkedIn</h3><div><span>Personal posting app</span><b>Advertpreneur Social Manager</b></div><div><span>Client ID</span><code>{linkedInStatus?.personalClientId ?? "77drthb7h6mp7m"}</code></div><div><span>Credential source</span><b>Managed securely by backend</b></div><div><span>OAuth callback</span><code>{linkedInStatus?.personalRedirectUri ?? "http://127.0.0.1:38937/oauth/linkedin/callback"}</code></div><div className="linkedin-actions"><button className="linkedin-connect" onClick={handleConnectLinkedIn}>{connectingLinkedIn ? "Restart connection" : "Connect personal account"}</button></div>{linkedInMessage ? <p className="setup-message linkedin-message">{linkedInMessage}</p> : null}<div className="linkedin-member-list">{(linkedInStatus?.accounts ?? []).map((account)=><div key={account.id}><span className="linkedin-avatar">{account.pictureUrl ? <img src={account.pictureUrl} alt=""/> : initials(account.name)}</span><span><b>{account.name}</b><small>{account.email || "LinkedIn member"}</small></span><em>Connected</em></div>)}{!(linkedInStatus?.accounts.length) ? <small>No personal LinkedIn accounts connected yet.</small> : null}</div><hr/><div><span>Company Page app</span><b>Advertpreneur Page Publishing</b></div><div><span>Company client ID</span><code>{linkedInStatus?.companyClientId ?? "77uxxsydc367ll"}</code></div><div><span>Associated Page</span><b>{linkedInStatus?.companyPage ?? "advertpreneur"}</b></div><div><span>Community Management</span><b className="status-pending">Awaiting approval</b></div><small className="settings-help">Company Page publishing stays feature-gated until LinkedIn approves Community Management API access.</small></article><article className="card settings-card"><h3>Local Services</h3><div><span>SQLite</span><b>Online</b></div><div><span>Scheduler</span><b>Every 30 seconds</b></div><div><span>Connected workspaces</span><b>{localAccounts.length}</b></div><div><span>Publishing queue</span><b>{scheduledCount} scheduled</b></div><div><span>MCP service</span><b>{mcpStatus?.online ? "Online" : "Offline"}</b></div><div><span>MCP endpoint</span><code>{mcpStatus?.endpoint ?? "http://127.0.0.1:38939/mcp"}</code></div></article></div>
+            <div className="settings-grid"><article className="card settings-card"><h3>Meta / Facebook</h3><div><span>App ID</span><code>{metaConfig?.appId ?? "1079289208340048"}</code></div><div><span>Credential source</span><b>Managed securely by backend</b></div><div><span>Graph version</span><code>{metaConfig?.apiVersion ?? "v23.0"}</code></div><small className="settings-help">No App Secret setup is required on this computer. Install Meta Manager anywhere and connect accounts with OAuth.</small></article><article className="card settings-card linkedin-settings"><h3>Instagram Professional</h3><div><span>Connection type</span><b>Direct Instagram Login</b></div><div><span>Instagram App ID</span><code>{instagramStatus?.appId ?? "2228119617760136"}</code></div><div><span>Credential source</span><b>Managed securely by backend</b></div><div><span>OAuth callback</span><code>{instagramStatus?.redirectUri ?? "https://127.0.0.1:38937/oauth/instagram/callback"}</code></div><div className="linkedin-actions"><button className="linkedin-connect" onClick={handleConnectInstagram}>{connectingInstagram ? "Open Instagram login" : "Connect Instagram"}</button></div>{instagramMessage ? <p className="setup-message linkedin-message">{instagramMessage}</p> : null}<small className="settings-help">No Instagram App Secret is stored in the desktop installation.</small></article><article className="card settings-card linkedin-settings"><h3>LinkedIn</h3><div><span>Personal posting app</span><b>Advertpreneur Social Manager</b></div><div><span>Client ID</span><code>{linkedInStatus?.personalClientId ?? "77drthb7h6mp7m"}</code></div><div><span>Credential source</span><b>Managed securely by backend</b></div><div><span>OAuth callback</span><code>{linkedInStatus?.personalRedirectUri ?? "http://127.0.0.1:38937/oauth/linkedin/callback"}</code></div><div className="linkedin-actions"><button className="linkedin-connect" onClick={handleConnectLinkedIn}>{connectingLinkedIn ? "Restart connection" : "Connect personal account"}</button></div>{linkedInMessage ? <p className="setup-message linkedin-message">{linkedInMessage}</p> : null}<div className="linkedin-member-list">{(linkedInStatus?.accounts ?? []).map((account)=><div key={account.id}><span className="linkedin-avatar">{account.pictureUrl ? <img src={account.pictureUrl} alt=""/> : initials(account.name)}</span><span><b>{account.name}</b><small>{account.email || "LinkedIn member"}</small></span><em>Connected</em></div>)}{!(linkedInStatus?.accounts.length) ? <small>No personal LinkedIn accounts connected yet.</small> : null}</div><hr/><div><span>Company Page app</span><b>Advertpreneur Page Publishing</b></div><div><span>Company client ID</span><code>{linkedInStatus?.companyClientId ?? "77uxxsydc367ll"}</code></div><div><span>Associated Page</span><b>{linkedInStatus?.companyPage ?? "advertpreneur"}</b></div><div><span>Community Management</span><b className="status-pending">Awaiting approval</b></div><small className="settings-help">Company Page publishing stays feature-gated until LinkedIn approves Community Management API access.</small></article><article className="card settings-card">
+              <h3>Media Hosting — WordPress</h3>
+              <p>Automatically upload local images and generate an Instagram-compatible public URL.</p>
+              <label><span>WordPress website</span><input value={mediaHostUrl} onChange={(e) => setMediaHostUrl(e.target.value)} placeholder="https://your-site.com" /></label>
+              <label><span>Username</span><input value={mediaHostUser} onChange={(e) => setMediaHostUser(e.target.value)} autoComplete="off" placeholder="WordPress account username" /></label>
+              <label><span>Application Password</span><input type="password" value={mediaHostPassword} onChange={(e) => setMediaHostPassword(e.target.value)} autoComplete="new-password" placeholder={mediaHostStatus?.configured ? "Leave empty to retain existing" : "WordPress application password"} /></label>
+              <button className="primary-page-button" disabled={savingMediaHost} onClick={handleSaveMediaHost}>{savingMediaHost ? "Saving…" : "Save media host"}</button>
+              {mediaHostStatus?.configured ? <small>Configured: {mediaHostStatus.siteUrl}</small> : null}
+              {mediaHostMessage ? <p className="setup-message">{mediaHostMessage}</p> : null}
+              <small className="settings-help">Create a dedicated Application Password in WordPress → Users → Profile. Credentials are stored on your own computer.</small>
+            </article><article className="card settings-card"><h3>Local Services</h3><div><span>SQLite</span><b>Online</b></div><div><span>Scheduler</span><b>Every 30 seconds</b></div><div><span>Connected workspaces</span><b>{localAccounts.length}</b></div><div><span>Publishing queue</span><b>{scheduledCount} scheduled</b></div><div><span>MCP service</span><b>{mcpStatus?.online ? "Online" : "Offline"}</b></div><div><span>MCP endpoint</span><code>{mcpStatus?.endpoint ?? "http://127.0.0.1:38939/mcp"}</code></div></article></div>
           </section>
         )}
 
@@ -987,11 +1070,13 @@ function App() {
               <label className="composer-full"><span>Caption</span><textarea value={composerCaption} onChange={(event) => setComposerCaption(event.target.value)} placeholder="Write the post caption…" rows={8}/></label>
               <label className="composer-full"><span>Hashtags</span><input value={composerHashtags} onChange={(event) => setComposerHashtags(event.target.value)} placeholder="#webdevelopment #shopify #ecommerce" /></label>
               <label className="composer-full"><span>Image URL <small>{composerPlatform === "instagram" || composerPlatform === "both" ? "Public HTTPS image required. Local files cannot be published by Instagram until hosted online." : "Optional public HTTPS image"}</small></span><input value={composerMediaUrl} onChange={(event) => setComposerMediaUrl(event.target.value)} placeholder="https://your-site.com/image.jpg" /></label>
+              <label className="composer-full"><span>Upload Local Image</span><input type="file" accept="image/jpeg,image/png,image/webp" disabled={uploadingMedia} onChange={(event) => { void handleLocalImage(event.target.files?.[0]); event.target.value = ""; }} /><small>{uploadingMedia ? "Converting and uploading…" : mediaHostStatus?.configured ? "Uploads to your WordPress media library and fills the public image URL." : "Enable WordPress Media Hosting in Settings first."}</small></label>
+              {composerMediaUrl.startsWith("https://") ? <div className="composer-full" style={{display:"flex",gap:12,alignItems:"center"}}><img src={composerMediaUrl} alt="Post image preview" style={{width:76,height:76,objectFit:"cover",borderRadius:12}} /><small>Hosted image</small></div> : null}
               <label className="composer-full"><span>Link URL <small>LinkedIn article preview or clickable link in image post</small></span><input value={composerLinkUrl} onChange={(event) => setComposerLinkUrl(event.target.value)} placeholder="https://advertpreneur.com/your-article" /></label>
               <label className="composer-full"><span>Schedule</span><input type="datetime-local" value={composerSchedule} onChange={(event) => setComposerSchedule(event.target.value)} /><small>Keep Meta Manager running at publishing time.</small></label>
             </div>
             {composerMessage ? <p className="setup-message">{composerMessage}</p> : null}
-            <div className="composer-actions"><button className="secondary" disabled={savingComposer} onClick={() => handleSaveComposer("draft")}>Save draft</button><button className="primary" disabled={savingComposer} onClick={() => handleSaveComposer("scheduled")}>{savingComposer ? "Saving…" : "Schedule post"}</button></div>
+            <div className="composer-actions"><button className="secondary" disabled={savingComposer} onClick={() => handleSaveComposer("draft")}>Save draft</button><button className="primary" disabled={savingComposer || uploadingMedia} onClick={() => handleSaveComposer("scheduled")}>{savingComposer ? "Saving…" : "Schedule post"}</button></div>
           </section>
         </div>
       )}

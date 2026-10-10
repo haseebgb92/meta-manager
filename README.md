@@ -4,7 +4,7 @@
 
 Meta Manager brings account connections, publishing, scheduling, media, analytics, and research into one desktop workspace. It is built with **Tauri + React + Rust**, keeps social account tokens on the user's machine, and uses a small secure OAuth broker so new installations never need provider App Secrets.
 
-> Current release: **v0.1.11** — Linux + Windows
+> Current public release: **v0.1.11** — Linux + Windows. **v0.1.13** is an unreleased media-hosting / MCP proxy development build.
 >
 > Product page: **https://advertpreneur.com/meta-manager/**
 >
@@ -192,3 +192,14 @@ The existing Linux `.deb` build remains independent and is validated after cross
 ---
 
 Built by **Advertpreneur** — Commerce. Growth. Technology.
+
+## Media Hosting — WordPress (v0.1.13)
+
+Meta Manager can host local images before publishing via an authorized WordPress site.
+
+1. In WordPress, generate a **dedicated Application Password** under Users → Profile. Use a user with media-upload permission. Do not paste it into chat.
+2. In the Meta Manager **Settings → Media Hosting — WordPress** card, configure the HTTPS website URL, WordPress username, and application password. Credentials stay in local keyring / owner-only local secret fallback.
+3. In **Content → Compose**, use **Upload Local Image** to choose a JPEG, PNG, or WebP file. The desktop composer converts it to a JPEG and uploads it to the site's media library; the returned public URL is filled into the image field.
+4. After configuring hosting, ChatGPT can use the MCP **upload_media** tool for JPEG/PNG files in Downloads (`confirm=true` required), then schedule the returned media URL using `create_post`. Convert PNG to JPEG before Instagram publishing.
+
+The media library attachment is public. Use a site you administer. Keep a separate Application Password for Meta Manager so access can be revoked independently. Local scheduling still requires the desktop app to be running; a hosted 24/7 scheduling service would need an additional authenticated cloud queue and server-side tokens.

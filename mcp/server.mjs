@@ -293,6 +293,47 @@ async function publishItem(itemId) {
   }
 }
 
+
+function getSetting(name) {
+  return rows("SELECT value FROM settings WHERE key=?", [name])[0]?.value ?? "";
+}
+async function hostLocalImage(filePath) {
+  const downloads=fs.realpathSync(path.join(os.homedir(),"Downloads"));
+  const resolved=fs.realpathSync(filePath);
+  const rel=path.relative(downloads,resolved);
+  if(!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error("Media uploads are restricted to your Downloads directory");
+  }
+  const info=fs.statSync(resolved);
+  if(!info.isFile() || info.size===0 || info.size>10*1024*1024) {
+    throw new Error("Image must be an ordinary file smaller than 10 MB");
+  }
+  const bytes=fs.readFileSync(resolved);
+  const jpg=bytes.subarray(0,3).equals(Buffer.from([255,216,255]));
+  const png=bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
+  if(!jpg&&!png) throw new Error("Supported files are JPEG and PNG. Convert WebP images to JPEG first.");
+  const mime=jpg?"image/jpeg":"image/png";
+  const site=getSetting("media_host_wp_site");
+  const username=getSetting("media_host_wp_username");
+  if(!site||!username) throw new Error("Configure WordPress Media Hosting in Meta Manager Settings first");
+  const url=new URL(site);
+  if(url.protocol!=="https:") throw new Error("WordPress host must use HTTPS");
+  const password=readSecret("media_host_wp_password");
+  const name="social-"+crypto.randomUUID()+(jpg?".jpg":".png");
+  const endpoint=site.replace(/\/$/,"")+"/wp-json/wp/v2/media";
+  const r=await fetch(endpoint,{method:"POST",headers:{
+    "authorization":"Basic "+Buffer.from(username+":"+password).toString("base64"),
+    "content-type":mime,
+    "content-disposition":'attachment; filename="'+name+'"'
+  },body:bytes,signal:AbortSignal.timeout(60000)});
+  const data=await r.json();
+  if(!r.ok||!data.source_url) throw new Error("WordPress upload failed ("+r.status+"): "+String(data.message||"No source URL").slice(0,240));
+  if(!httpsUrl(data.source_url)) throw new Error("WordPress returned non-HTTPS media URL");
+  return {mediaUrl:data.source_url,mediaId:data.id??null,mimeType:mime,
+    instagramReady:jpg,
+    note:jpg?"Hosted JPEG is ready to schedule":"PNG uploaded. Convert to JPEG for the most reliable Instagram publishing"};
+}
+
 function getServer() {
   const server = new McpServer({ name: "meta-manager", version: "0.1.12" });
   server.registerTool("list_accounts", { description: "List Meta Manager workspaces and linked Facebook/Instagram IDs without exposing tokens.", inputSchema: {} }, async()=>textResult(listAccounts()));
@@ -321,6 +362,10 @@ function getServer() {
     let sql="SELECT id,account_id AS accountId,title,platform,status,caption,hashtags,media_url AS mediaUrl,link_url AS linkUrl,scheduled_for AS scheduledFor,published_post_id AS publishedPostId,published_at AS publishedAt,last_error AS lastError FROM calendar_items WHERE 1=1"; const params=[];
     if(account_id){sql+=" AND account_id=?";params.push(account_id);} if(status){sql+=" AND status=?";params.push(status);} sql+=" ORDER BY COALESCE(scheduled_for,created_at) ASC";
     return textResult(rows(sql,params).map((item)=>({...item,hashtags:JSON.parse(item.hashtags||"[]")})));
+  });
+  server.registerTool("upload_media", { description: "Upload a JPEG or PNG file from your Downloads folder to your configured WordPress media host. Returns public image URL. External media write; confirm must be true.", inputSchema: { file_path:z.string(), confirm:z.boolean() } }, async({file_path,confirm})=>{
+    if(!confirm) throw new Error("Uploading media requires confirm=true");
+    return textResult(await hostLocalImage(file_path));
   });
   server.registerTool("create_post", { description: "Create a local Facebook, Instagram or LinkedIn draft or scheduled post with media URL and link URL. Instagram requires publicly hosted HTTPS image. Does not publish immediately.", inputSchema: { account_id:z.string(), title:z.string().min(1), platform:z.enum(["facebook","instagram","both","linkedin"]), caption:z.string().optional(), hashtags:z.array(z.string()).optional(), media_url:z.string().url().optional(), link_url:z.string().url().optional(), scheduled_for:z.string().optional() } }, async({account_id,title,platform,caption,hashtags=[],media_url,link_url,scheduled_for})=>{
     const account=getAccount(account_id);

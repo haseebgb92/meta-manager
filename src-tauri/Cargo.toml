@@ -1,6 +1,6 @@
 [package]
 name = "meta-manager"
-version = "0.1.12"
+version = "0.1.13"
 description = "Local-first Meta social publishing and analytics manager"
 authors = ["Advertpreneur"]
 license = ""
@@ -17,6 +17,7 @@ tauri-build = { version = "2.7.1", features = [] }
 
 [dependencies]
 serde_json = "1.0"
+base64 = "0.22"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.12.1", features = [] }
