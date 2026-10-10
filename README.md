@@ -215,3 +215,11 @@ Cloud sign-in now uses a connected LinkedIn or Instagram profile. No Supabase em
 ## Cloud media upload fix (v0.1.16)
 
 Cloud images now use a signed Supabase Storage upload URL issued only after the user has authenticated through Meta Manager Cloud. This makes uploads compatible with the one-click social session without distributing an admin key or requiring a separate Supabase JWT. Signed URLs are short-lived and are limited to one randomly generated object in the existing public media bucket. The desktop composer and MCP `upload_cloud_media` tool both use this flow.
+
+## v0.1.17 — Per-account Instagram sync and combined calendar
+
+- Direct Instagram professional logins (without Facebook Pages) now show as connected and load their available profile fields, recent posts and media through `graph.instagram.com` with a bearer token.
+- Every connected account gets an individual Overview and Media view, with refresh controls and visible sync errors. Instagram Insights remain unavailable if the Instagram API denies `insights` permissions; no fake zeros are displayed.
+- The Calendar merges local SQLite items with owner-scoped cloud posts from the Supabase backend. Cloud posts retain title, caption, media URL, schedule, status and errors; local cloud drafts are de-duplicated by `source_id`. Published cloud posts remain visible as history in the calendar and in the Published view.
+- Fixed snake_case Supabase records being rejected by the camelCase Tauri CloudPost model; added a regression test verifying both decoding and UI serialization.
+- The cloud queue refreshes automatically while its relevant views are open; OAuth reconnection invalidates cached profile data, and account cards now offer direct Overview/Media navigation.

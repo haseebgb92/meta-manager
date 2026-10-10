@@ -128,3 +128,11 @@ button{border:0;background:none;color:inherit;cursor:pointer}
 .cloud-email-link{background:none;color:#7285a8;font-size:10px;text-decoration:underline;text-underline-offset:3px;padding:5px 0;cursor:pointer;justify-self:start}
 .cloud-email-fallback{display:grid;gap:10px;margin-top:8px;padding-top:12px;border-top:1px solid #e6eaf1}
 .cloud-settings > .primary-page-button{justify-content:center;width:100%;margin:12px 0}
+
+/* Connected-account diagnostics and merged cloud queue */
+.account-card-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:13px}
+.account-card-actions button{border:1px solid #e4e9f5;background:#f8faff;color:#4262a3;padding:8px 12px;border-radius:9px;font-size:9px}
+.account-sync-error,.cloud-post-error{display:block;color:#b85c5c;font-size:9px;line-height:1.45;margin-top:8px}
+.account-insights-notice{padding:18px 22px;margin:12px 0;color:#65738b;font-size:11px;line-height:1.65}
+.queue-status.cloud_publishing{background:#ecf4ff;color:#447abb}
+.queue-status.needs_review,.queue-status.failed{background:#fff3e9;color:#a96938}

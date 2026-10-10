@@ -19,15 +19,28 @@ pub struct CloudStatus { pub signed_in: bool, pub email: String }
 #[serde(rename_all="camelCase")]
 pub struct CloudPost {
     pub id: String,
+    #[serde(alias="source_id")]
     pub source_id: String,
+    #[serde(alias="account_id")]
     pub account_id: String,
     pub provider: String,
     pub title: String,
+    pub caption: String,
+    pub hashtags: Vec<String>,
+    #[serde(alias="media_url")]
+    pub media_url: Option<String>,
+    #[serde(alias="link_url")]
+    pub link_url: Option<String>,
     pub status: String,
+    #[serde(alias="scheduled_for")]
     pub scheduled_for: String,
     pub attempts: i64,
+    #[serde(alias="last_error")]
     pub last_error: Option<String>,
+    #[serde(alias="published_remote_id")]
     pub published_remote_id: Option<String>,
+    #[serde(alias="published_at")]
+    pub published_at: Option<String>,
 }
 
 fn cloud_secret(app:&AppHandle,name:&str)->Result<String,String>{
@@ -296,4 +309,24 @@ pub fn logout(app:&AppHandle)->Result<(),String>{
     db::set_setting(app,EMAIL,"")?;
     db::set_setting(app,"mm_cloud_identity_label","")?;
     Ok(())
+}
+#[cfg(test)]
+mod cloud_calendar_tests {
+    use super::CloudPost;
+
+    #[test]
+    fn cloud_post_preserves_calendar_media_and_caption() {
+        let result = serde_json::from_value::<CloudPost>(serde_json::json!({
+            "id":"remote-123", "source_id":"local-1", "account_id":"account-1",
+            "provider":"instagram", "title":"Scheduled in Cloud", "caption":"Cloud test caption",
+            "hashtags":["webdev"], "media_url":"https://example.org/a.jpg", "link_url":null,
+            "status":"scheduled", "scheduled_for":"2026-10-10T10:20:00+00:00",
+            "attempts":0, "last_error":null, "published_remote_id":null, "published_at":null
+        })).expect("cloud calendar must deserialize the full post payload");
+        assert_eq!(result.caption, "Cloud test caption");
+        assert_eq!(result.media_url.as_deref(), Some("https://example.org/a.jpg"));
+        let frontend = serde_json::to_value(&result).unwrap();
+        assert_eq!(frontend["accountId"], "account-1");
+        assert_eq!(frontend["mediaUrl"], "https://example.org/a.jpg");
+    }
 }

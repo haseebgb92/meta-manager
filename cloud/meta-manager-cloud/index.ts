@@ -181,7 +181,7 @@ Deno.serve(async(req:Request)=>{
   }
   if(body.action==="list"){
    const {data,error}=await admin.from("mm_cloud_posts")
-    .select("id,source_id,account_id,provider,title,status,scheduled_for,attempts,last_error,published_remote_id,published_at")
+    .select("id,source_id,account_id,provider,title,caption,hashtags,media_url,link_url,status,scheduled_for,attempts,last_error,published_remote_id,published_at")
     .eq("owner_id",owner).order("created_at",{ascending:false}).limit(150);
    return error?fail("Cloud calendar unavailable",500):response({posts:data});
   }

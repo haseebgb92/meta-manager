@@ -76,11 +76,6 @@ type Account = {
   tone: string;
 };
 
-const demoAccounts: Account[] = [
-  { name: "Advertpreneur", platforms: "Facebook + Instagram", initials: "AD", tone: "blue" },
-  { name: "Aurora Studio", platforms: "Facebook + Instagram", initials: "AS", tone: "violet" },
-  { name: "Lume Beauty", platforms: "Instagram", initials: "LB", tone: "rose" },
-];
 
 const nav = [
   ["Overview", LayoutDashboard],
@@ -192,6 +187,7 @@ function App() {
   const [showCloudEmailFallback, setShowCloudEmailFallback] = useState(false);
   const [cloudMode, setCloudMode] = useState(true);
   const [cloudPosts, setCloudPosts] = useState<CloudPost[]>([]);
+  const [cloudCalendarError, setCloudCalendarError] = useState("");
 
   const [publishingId, setPublishingId] = useState<string | null>(null);
   const [savingComposer, setSavingComposer] = useState(false);
@@ -204,6 +200,7 @@ function App() {
   const [mcpStatus, setMcpStatus] = useState<McpStatus | null>(null);
   const [refreshingAccounts, setRefreshingAccounts] = useState(false);
   const [accountRefreshMessage, setAccountRefreshMessage] = useState("");
+  const [accountDataRevision, setAccountDataRevision] = useState(0);
   const [mediaLibrary, setMediaLibrary] = useState<MediaLibrary | null>(null);
   const [loadingMedia, setLoadingMedia] = useState(false);
   const [mediaError, setMediaError] = useState("");
@@ -256,6 +253,9 @@ function App() {
       setConnectingMeta(false);
       setConnectingMetaProvider(null);
       const refreshed = await getAccounts();
+      dashboardLoadedKey.current = null;
+      mediaLoadedKey.current = null;
+      setAccountDataRevision((revision) => revision + 1);
       setLocalAccounts(refreshed);
       const connected = await getMetaConfigStatus();
       setMetaConfig(connected);
@@ -279,6 +279,7 @@ function App() {
       setConnectingLinkedIn(false);
       setLinkedInStatus(await getLinkedInStatus());
       setLocalAccounts(await getAccounts());
+      setAccountDataRevision((revision) => revision + 1);
       dashboardLoadedKey.current = null;
       calendarLoadedKey.current = null;
       setShowConnectAccount(false);
@@ -297,7 +298,9 @@ function App() {
       setConnectingInstagram(false);
       setInstagramStatus(await getInstagramStatus());
       setLocalAccounts(await getAccounts());
+      setAccountDataRevision((revision) => revision + 1);
       dashboardLoadedKey.current = null;
+      mediaLoadedKey.current = null;
       calendarLoadedKey.current = null;
       setShowConnectAccount(false);
     }).then((dispose) => { unlistenInstagramComplete = dispose; });
@@ -319,7 +322,7 @@ function App() {
   }, []);
 
   const accounts = useMemo<Account[]>(() => {
-    if (!localAccounts.length) return demoAccounts;
+    if (!localAccounts.length) return [];
     return localAccounts.map((account, index) => ({
       name: account.name,
       platforms: account.status === "linkedin_connected"
@@ -361,7 +364,7 @@ function App() {
       .catch((error) => { if (!cancelled) { setLiveDashboard(null); setLiveError(String(error)); } })
       .finally(() => { if (!cancelled) setLoadingLive(false); });
     return () => { cancelled = true; };
-  }, [activeNav, selectedAccountId, localAccounts.length]);
+  }, [activeNav, selectedAccountId, localAccounts.length, accountDataRevision]);
 
   const formatNumber = (value: number | undefined) => {
     const number = value ?? 0;
@@ -382,6 +385,25 @@ function App() {
     const timer = window.setInterval(refreshCalendar, 10_000);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [selectedAccountId, activeNav]);
+
+  useEffect(() => {
+    if (!cloudStatus?.signedIn) return;
+    if (!["Overview", "Calendar", "Content", "Published", "Accounts"].includes(activeNav)) return;
+    let cancelled = false;
+    const refreshCloud = () => {
+      void cloudListPosts().then((posts) => {
+        if (!cancelled) {
+          setCloudPosts(posts);
+          setCloudCalendarError("");
+        }
+      }).catch((error) => {
+        if (!cancelled) setCloudCalendarError("Cloud calendar could not sync: " + String(error));
+      });
+    };
+    refreshCloud();
+    const timer = window.setInterval(refreshCloud, 15_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [cloudStatus?.signedIn, activeNav, selectedAccountId]);
 
   useEffect(() => {
     const refresh = () => getMcpStatus().then(setMcpStatus).catch(() => setMcpStatus(null));
@@ -405,7 +427,7 @@ function App() {
       .catch(() => { if (!cancelled) setLiveInsights(null); })
       .finally(() => { if (!cancelled) setLoadingInsights(false); });
     return () => { cancelled = true; };
-  }, [activeNav, selectedAccountId]);
+  }, [activeNav, selectedAccountId, accountDataRevision]);
 
   useEffect(() => {
     if (activeNav !== "Media") return;
@@ -427,7 +449,7 @@ function App() {
       .catch((error) => { if (!cancelled) { setMediaLibrary(null); setMediaError(String(error)); } })
       .finally(() => { if (!cancelled) setLoadingMedia(false); });
     return () => { cancelled = true; };
-  }, [activeNav, selectedAccountId]);
+  }, [activeNav, selectedAccountId, accountDataRevision]);
 
   async function handleResearch() {
     const query = researchQuery.trim();
@@ -448,12 +470,47 @@ function App() {
     ? localAccounts.find((account) => account.id === selectedAccountId) ?? null
     : null;
 
-  const queueCalendarItems = calendarItems.filter((item) => item.status !== "published");
-  const locallyPublishedItems = calendarItems.filter((item) => item.status === "published");
+  // Cloud-scheduled posts live in Supabase, not SQLite. Always merge both
+  // sources, using a cloud record in preference to its matching local draft.
+  const allCalendarItems = useMemo<LocalCalendarItem[]>(() => {
+    const remote = cloudPosts
+      .filter((post) => !selectedAccountId || post.accountId === selectedAccountId)
+      .map((post): LocalCalendarItem => ({
+        id: post.id,
+        accountId: post.accountId,
+        title: post.title,
+        platform: post.provider as LocalCalendarItem["platform"],
+        status: post.status === "scheduled" ? "cloud_scheduled"
+          : post.status === "publishing" ? "cloud_publishing"
+          : post.status,
+        caption: post.caption || null,
+        hashtags: post.hashtags || [],
+        mediaUrl: post.mediaUrl || null,
+        linkUrl: post.linkUrl || null,
+        publishedPostId: post.publishedRemoteId || null,
+        scheduledFor: post.scheduledFor,
+        publishedAt: post.publishedAt || null,
+        lastError: post.lastError || null,
+      }));
+    const cloudSourceIds = new Set(
+      cloudPosts.filter((post) => !selectedAccountId || post.accountId === selectedAccountId)
+        .map((post) => post.sourceId)
+    );
+    const local = calendarItems.filter((item) => !cloudSourceIds.has(item.id));
+    return [...remote, ...local].sort((a, b) =>
+      (a.scheduledFor || "").localeCompare(b.scheduledFor || "")
+    );
+  }, [calendarItems, cloudPosts, selectedAccountId]);
+  const calendarDisplayItems = allCalendarItems.filter((item) => item.status !== "cancelled");
+  const queueCalendarItems = calendarDisplayItems.filter((item) => item.status !== "published");
+  const locallyPublishedItems = allCalendarItems.filter((item) => item.status === "published");
   const localPublishedItems = locallyPublishedItems.filter((item) => !(liveDashboard?.recentPosts ?? []).some((post) => item.publishedPostId?.includes(post.id)));
   const scheduledCount = queueCalendarItems.filter((item) => ["scheduled","cloud_scheduled"].includes(item.status)).length;
   const draftCount = queueCalendarItems.filter((item) => item.status === "draft").length;
   const linkedinPublishedItems = localPublishedItems.filter((item) => item.platform === "linkedin");
+  const selectedInstagramDirect = Boolean(
+    selectedAccount?.instagramAccountId && !selectedAccount.facebookPageId
+  );
   const selectedLinkedInAccount = selectedAccount?.status === "linkedin_connected"
     ? linkedInStatus?.accounts.find((account) => account.id === selectedAccount.id) ?? null
     : null;
@@ -472,11 +529,11 @@ function App() {
     for (let day = 1; day <= last.getDate(); day++) {
       const date = new Date(now.getFullYear(), now.getMonth(), day);
       const key = date.toISOString().slice(0, 10);
-      cells.push({ date, items: queueCalendarItems.filter((item) => item.scheduledFor?.slice(0,10) === key) });
+      cells.push({ date, items: calendarDisplayItems.filter((item) => item.scheduledFor?.slice(0,10) === key) });
     }
     while (cells.length % 7) cells.push({ date: null, items: [] });
     return { label: now.toLocaleDateString(undefined, {month:"long",year:"numeric"}), cells };
-  }, [queueCalendarItems]);
+  }, [calendarDisplayItems]);
 
   const weekCalendar = useMemo(() => {
     const now = new Date();
@@ -486,9 +543,9 @@ function App() {
       const date = new Date(monday);
       date.setDate(monday.getDate()+index);
       const key = date.toISOString().slice(0,10);
-      return { date, items: queueCalendarItems.filter((item)=>item.scheduledFor?.slice(0,10)===key) };
+      return { date, items: calendarDisplayItems.filter((item)=>item.scheduledFor?.slice(0,10)===key) };
     });
-  }, [queueCalendarItems]);
+  }, [calendarDisplayItems]);
 
   async function handleRefreshAccounts() {
     if (refreshingAccounts) return;
@@ -498,6 +555,7 @@ function App() {
       const result = await refreshMetaAccounts();
       dashboardLoadedKey.current = null;
       mediaLoadedKey.current = null;
+      setAccountDataRevision((revision) => revision + 1);
       const refreshedAccounts = await getAccounts();
       setLocalAccounts(refreshedAccounts);
       const selectedLocal = selectedAccountId ? refreshedAccounts.find((account) => account.id === selectedAccountId) : null;
@@ -513,6 +571,13 @@ function App() {
     } finally {
       setRefreshingAccounts(false);
     }
+  }
+
+  function handleRefreshAccountData() {
+    dashboardLoadedKey.current = null;
+    mediaLoadedKey.current = null;
+    setAccountDataRevision((revision) => revision + 1);
+    setAccountRefreshMessage("Refreshing profile details and recent posts for the selected accounts.");
   }
 
   async function handlePublishNow(item: LocalCalendarItem) {
@@ -975,13 +1040,13 @@ function App() {
                   <div><span className="health-icon fb">f</span><span><b>Connected Pages</b><small>{liveDashboard?.connectedPages ?? 0} available through Meta</small></span><em>Healthy</em><ChevronRight size={16}/></div>
                   <div><span className="health-icon ig">◎</span><span><b>Instagram Accounts</b><small>{liveDashboard?.connectedInstagram ?? 0} linked professional accounts</small></span><em>Healthy</em><ChevronRight size={16}/></div>
                   <div><span className="health-icon li">in</span><span><b>LinkedIn Accounts</b><small>{linkedInStatus?.accounts.length ?? 0} connected personal profiles</small></span><em>{linkedInStatus?.accounts.length ? "Healthy" : "Not connected"}</em><ChevronRight size={16}/></div>
-                  <div><span className="health-icon"><CheckCircle2 size={17}/></span><span><b>Calendar Queue</b><small>{scheduledCount} scheduled · {draftCount} drafts</small></span><em>Local</em><ChevronRight size={16}/></div>
+                  <div><span className="health-icon"><CheckCircle2 size={17}/></span><span><b>Calendar Queue</b><small>{scheduledCount} scheduled · {draftCount} drafts</small></span><em>{cloudStatus?.signedIn ? "Cloud + Local" : "Local"}</em><ChevronRight size={16}/></div>
                   <div><span className="health-icon"><Activity size={17}/></span><span><b>Live Sync</b><small>{loadingLive ? "Refreshing Meta data…" : "Latest profile and content data loaded"}</small></span><em>{loadingLive ? "Syncing" : "Online"}</em><ChevronRight size={16}/></div>
                 </div>
               </article>
 
               <article className="card calendar-card">
-                <div className="card-head compact"><div><h2>Calendar Queue</h2><p>Real local drafts and scheduled content</p></div><button className="link-btn" onClick={() => setActiveNav("Calendar")}>Open calendar <ChevronRight size={15}/></button></div>
+                <div className="card-head compact"><div><h2>Calendar Queue</h2><p>Local drafts and cloud-scheduled posts</p></div><button className="link-btn" onClick={() => setActiveNav("Calendar")}>Open calendar <ChevronRight size={15}/></button></div>
                 <div className="queue-preview">
                   {queueCalendarItems.slice(0, 6).map((item) => <button key={item.id} className="queue-preview-row queue-preview-button" onClick={() => setViewingCalendarItem(item)}><span className={`queue-status ${item.status}`}>{item.status}</span><b>{item.title}</b><small>{item.scheduledFor ? new Date(item.scheduledFor).toLocaleString() : "Not scheduled"}</small></button>)}
                   {!queueCalendarItems.length ? <div className="empty-live">No drafts or scheduled posts yet.</div> : null}
@@ -1014,9 +1079,10 @@ function App() {
 
         {activeNav === "Analytics" && (
           <section className="page-panel">
-            <div className="page-title-row"><div><span className="eyebrow">LIVE SNAPSHOT</span><h2>Analytics</h2><p>{selectedLinkedInAccount ? "LinkedIn personal-profile analytics are not available with the current self-service permissions." : "Current audience and recent-content engagement from Meta."}</p></div></div>
+            <div className="page-title-row"><div><span className="eyebrow">LIVE SNAPSHOT</span><h2>Analytics</h2><p>{selectedLinkedInAccount ? "LinkedIn personal-profile analytics are not available with the current self-service permissions." : "Audience and recent-content engagement where network permissions allow; direct Instagram logins may have limited insight access."}</p></div></div>
             {selectedLinkedInAccount ? <div className="empty-live roomy">Your LinkedIn account is connected for identity and publishing. Historical personal posts and analytics require restricted LinkedIn read permissions that are not currently granted.</div> : null}
-            {!selectedLinkedInAccount ? <><div className="kpi-grid">
+            {selectedInstagramDirect ? <div className="card account-insights-notice">Your Instagram profile and media are available under Overview, Published and Media. Instagram's API has not granted this account access to reach and interaction insights, so these metrics are not displayed as zeros.</div> : null}
+            {!selectedLinkedInAccount && !selectedInstagramDirect ? <><div className="kpi-grid">
               <KpiCard icon={BarChart3} label="Facebook Views" value={loadingInsights ? "…" : formatNumber(insightTotal("facebook_views"))} change="28D" accent="blue"/>
               <KpiCard icon={Heart} label="Facebook Engagement" value={loadingInsights ? "…" : formatNumber(insightTotal("facebook_engagement"))} change="28D" accent="pink"/>
               <KpiCard icon={Users} label="Instagram Reach" value={loadingInsights ? "…" : formatNumber(insightTotal("instagram_reach"))} change="28D" accent="violet"/>
@@ -1029,11 +1095,12 @@ function App() {
 
         {activeNav === "Calendar" && (
           <section className="page-panel">
-            <div className="page-title-row"><div><span className="eyebrow">LOCAL PUBLISHING QUEUE</span><h2>Content Calendar</h2><p>Drafts and scheduled posts stay in your local Meta Manager database.</p></div><button className="primary-page-button" onClick={() => setShowComposer(true)}><Plus size={16}/> New post</button></div>
-            <div className="calendar-toolbar"><div className="period-tabs"><button className={calendarView === "month" ? "selected" : ""} onClick={() => setCalendarView("month")}>Month</button><button className={calendarView === "week" ? "selected" : ""} onClick={() => setCalendarView("week")}>Week</button><button className={calendarView === "list" ? "selected" : ""} onClick={() => setCalendarView("list")}>List</button></div><b>{calendarView === "month" ? monthCalendar.label : calendarView === "week" ? "This week" : `${queueCalendarItems.length} queued`}</b></div>
+            <div className="page-title-row"><div><span className="eyebrow">LOCAL + CLOUD PUBLISHING</span><h2>Content Calendar</h2><p>Local drafts and cloud-scheduled posts appear together. Cloud posting works when your computer is off.</p></div><button className="primary-page-button" onClick={() => setShowComposer(true)}><Plus size={16}/> New post</button></div>
+            {cloudCalendarError ? <p className="live-error">{cloudCalendarError}</p> : null}
+            <div className="calendar-toolbar"><div className="period-tabs"><button className={calendarView === "month" ? "selected" : ""} onClick={() => setCalendarView("month")}>Month</button><button className={calendarView === "week" ? "selected" : ""} onClick={() => setCalendarView("week")}>Week</button><button className={calendarView === "list" ? "selected" : ""} onClick={() => setCalendarView("list")}>List</button></div><b>{calendarView === "month" ? monthCalendar.label : calendarView === "week" ? "This week" : `${calendarDisplayItems.length} posts`}</b></div>
             {calendarView === "month" && <div className="month-calendar card"><div className="month-head">{["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map((day)=><b key={day}>{day}</b>)}</div><div className="month-grid">{monthCalendar.cells.map((cell,index)=><div className={`month-cell ${cell.date ? "" : "empty"}`} key={index}>{cell.date ? <><span>{cell.date.getDate()}</span>{cell.items.slice(0,3).map((item)=><button key={item.id} className={`month-item ${item.status}`} title={item.title} onClick={() => setViewingCalendarItem(item)}><i>{item.platform === "instagram" ? "IG" : item.platform === "facebook" ? "FB" : item.platform === "linkedin" ? "LI" : "BOTH"}</i>{item.title}</button>)}</> : null}</div>)}</div></div>}
             {calendarView === "week" && <div className="week-calendar">{weekCalendar.map((day)=><article className="card week-day" key={day.date.toISOString()}><header><b>{day.date.toLocaleDateString(undefined,{weekday:"short"})}</b><span>{day.date.getDate()}</span></header>{day.items.map((item)=><button className="week-item week-item-button" key={item.id} onClick={() => setViewingCalendarItem(item)}><span className={`queue-status ${item.status}`}>{item.status}</span><b>{item.title}</b><small>{item.scheduledFor ? new Date(item.scheduledFor).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}) : "—"}</small></button>)}{!day.items.length ? <p>No posts</p> : null}</article>)}</div>}
-            {calendarView === "list" && <div className="calendar-list-card card"><div className="calendar-list-head"><span>Status</span><span>Post</span><span>Platform</span><span>Schedule</span><span>Action</span></div>{queueCalendarItems.map((item) => <div className="calendar-list-row" key={item.id}><span className={`queue-status ${item.status}`}>{item.status}</span><div><b>{item.title}</b><small>{item.caption || "No caption yet"}</small></div><i className="platform-text">{item.platform}</i><time>{item.scheduledFor ? new Date(item.scheduledFor).toLocaleString() : "—"}</time><div className="calendar-actions"><button className="view-action" onClick={() => setViewingCalendarItem(item)}>View</button>{["draft","scheduled","failed"].includes(item.status) ? <button disabled={publishingId === item.id} onClick={() => handlePublishNow(item)}>{publishingId === item.id ? "Publishing…" : "Publish now"}</button> : null}</div></div>)}{!queueCalendarItems.length ? <div className="empty-live">Your calendar queue is empty. Published posts have moved to Published.</div> : null}</div>}
+            {calendarView === "list" && <div className="calendar-list-card card"><div className="calendar-list-head"><span>Status</span><span>Post</span><span>Platform</span><span>Schedule</span><span>Action</span></div>{calendarDisplayItems.map((item) => <div className="calendar-list-row" key={item.id}><span className={`queue-status ${item.status}`}>{item.status}</span><div><b>{item.title}</b><small>{item.caption || "No caption yet"}</small>{item.lastError ? <small className="cloud-post-error">{item.lastError}</small> : null}</div><i className="platform-text">{item.platform}</i><time>{item.scheduledFor ? new Date(item.scheduledFor).toLocaleString() : "—"}</time><div className="calendar-actions"><button className="view-action" onClick={() => setViewingCalendarItem(item)}>View</button>{["draft","scheduled","failed"].includes(item.status) ? <button disabled={publishingId === item.id} onClick={() => handlePublishNow(item)}>{publishingId === item.id ? "Publishing…" : "Publish now"}</button> : null}</div></div>)}{!calendarDisplayItems.length ? <div className="empty-live">No local or cloud posts are available for this account yet.</div> : null}</div>}
           </section>
         )}
 
@@ -1076,8 +1143,8 @@ function App() {
 
         {activeNav === "Accounts" && (
           <section className="page-panel">
-            <div className="page-title-row"><div><span className="eyebrow">CONNECTED WORKSPACES</span><h2>Accounts</h2><p>Manage Facebook, Instagram and connected LinkedIn personal profiles in one place.</p>{accountRefreshMessage ? <small className="account-refresh-message">{accountRefreshMessage}</small> : null}</div><div className="account-page-actions"><button className="secondary-page-button" disabled={refreshingAccounts} onClick={handleRefreshAccounts}>{refreshingAccounts ? "Refreshing…" : "Refresh from Meta"}</button><button className="primary-page-button" onClick={() => setShowConnectAccount(true)}><Plus size={16}/> Connect account</button></div></div>
-            <div className="accounts-page-grid">{(liveDashboard?.workspaces ?? []).map((workspace)=><article className="card account-detail-card" key={workspace.accountId}><div className="account-detail-head"><div className="live-avatar-wrap">{workspace.instagramPictureUrl || workspace.facebookPictureUrl ? <img src={workspace.instagramPictureUrl || workspace.facebookPictureUrl || ""} alt=""/> : <span>{initials(workspace.name)}</span>}</div><div><h3>{workspace.name}</h3><p>{workspace.instagramUsername ? `@${workspace.instagramUsername}` : "Facebook Page"}</p></div><em>{workspace.status === "connected" ? "Connected" : workspace.status}</em></div><div className="account-detail-stats"><div><span>Facebook followers</span><b>{formatNumber(workspace.facebookFollowers)}</b></div><div><span>Instagram followers</span><b>{formatNumber(workspace.instagramFollowers)}</b></div><div><span>IG media</span><b>{formatNumber(workspace.instagramMediaCount)}</b></div></div></article>)}{(linkedInStatus?.accounts ?? []).map((account)=><article className="card account-detail-card linkedin-account-card" key={`li-${account.id}`}><div className="account-detail-head"><div className="live-avatar-wrap linkedin-avatar-large">{account.pictureUrl ? <img src={account.pictureUrl} alt=""/> : <span>{initials(account.name)}</span>}</div><div><h3>{account.name}</h3><p>{account.email || "LinkedIn personal profile"}</p></div><em>Connected</em></div><div className="account-detail-stats"><div><span>Platform</span><b>LinkedIn</b></div><div><span>Publishing</span><b>Enabled</b></div><div><span>History sync</span><b>Restricted</b></div></div></article>)}</div>
+            <div className="page-title-row"><div><span className="eyebrow">CONNECTED WORKSPACES</span><h2>Accounts</h2><p>Manage Facebook, Instagram and connected LinkedIn personal profiles in one place.</p>{accountRefreshMessage ? <small className="account-refresh-message">{accountRefreshMessage}</small> : null}</div><div className="account-page-actions"><button className="secondary-page-button" onClick={handleRefreshAccountData}>Refresh profile data</button><button className="secondary-page-button" disabled={refreshingAccounts} onClick={handleRefreshAccounts}>{refreshingAccounts ? "Refreshing…" : "Refresh from Meta"}</button><button className="primary-page-button" onClick={() => setShowConnectAccount(true)}><Plus size={16}/> Connect account</button></div></div>
+            <div className="accounts-page-grid">{(liveDashboard?.workspaces ?? []).map((workspace)=><article className="card account-detail-card" key={workspace.accountId}><div className="account-detail-head"><div className="live-avatar-wrap">{workspace.instagramPictureUrl || workspace.facebookPictureUrl ? <img src={workspace.instagramPictureUrl || workspace.facebookPictureUrl || ""} alt=""/> : <span>{initials(workspace.name)}</span>}</div><div><h3>{workspace.name}</h3><p>{workspace.instagramUsername ? `@${workspace.instagramUsername}` : "Facebook Page"}</p></div><em>{workspace.status === "connected" ? "Connected" : workspace.status}</em></div><div className="account-detail-stats"><div><span>Facebook followers</span><b>{workspace.facebookPageId ? formatNumber(workspace.facebookFollowers) : "—"}</b></div><div><span>Instagram followers</span><b>{workspace.instagramAccountId ? formatNumber(workspace.instagramFollowers) : "—"}</b></div><div><span>IG media</span><b>{workspace.instagramAccountId ? formatNumber(workspace.instagramMediaCount) : "—"}</b></div></div>{workspace.error ? <p className="account-sync-error">{workspace.error}</p> : null}<div className="account-card-actions"><button className="secondary-page-button" onClick={() => { setSelectedAccountId(workspace.accountId);setActiveNav("Overview"); }}>View account activity</button><button className="secondary-page-button" onClick={() => { setSelectedAccountId(workspace.accountId);setActiveNav("Media"); }}>View media</button></div></article>)}{(linkedInStatus?.accounts ?? []).map((account)=><article className="card account-detail-card linkedin-account-card" key={`li-${account.id}`}><div className="account-detail-head"><div className="live-avatar-wrap linkedin-avatar-large">{account.pictureUrl ? <img src={account.pictureUrl} alt=""/> : <span>{initials(account.name)}</span>}</div><div><h3>{account.name}</h3><p>{account.email || "LinkedIn personal profile"}</p></div><em>Connected</em></div><div className="account-detail-stats"><div><span>Platform</span><b>LinkedIn</b></div><div><span>Publishing</span><b>Enabled</b></div><div><span>History sync</span><b>Restricted</b></div></div></article>)}</div>
           </section>
         )}
 

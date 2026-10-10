@@ -4,7 +4,8 @@ export type CloudStatus = { signedIn: boolean; email: string };
 export type CloudPost = {
   id:string; sourceId:string; accountId:string; provider:string; title:string;
   status:string; scheduledFor:string; attempts:number; lastError:string|null;
-  publishedRemoteId:string|null;
+  caption:string; hashtags:string[]; mediaUrl:string|null; linkUrl:string|null;
+  publishedRemoteId:string|null; publishedAt:string|null;
 };
 export const getCloudStatus=()=>invoke<CloudStatus>("get_cloud_status");
 export const cloudConnectExisting=()=>invoke<CloudStatus>("cloud_connect_existing");

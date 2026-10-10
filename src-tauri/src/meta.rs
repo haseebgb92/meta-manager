@@ -847,6 +847,110 @@ fn fetch_json(url: &str) -> Result<serde_json::Value, String> {
     response.into_json().map_err(|e| e.to_string())
 }
 
+// Direct Instagram Login uses graph.instagram.com and does not have a
+// Facebook Page token. Do not report these independently connected accounts
+// as "disconnected" just because facebook_page_id is None.
+fn fetch_json_bearer(url: &str, token: &str) -> Result<serde_json::Value, String> {
+    let response = ureq::get(url)
+        .timeout(std::time::Duration::from_secs(12))
+        .set("Authorization", &format!("Bearer {token}"))
+        .call()
+        .map_err(|error| format!("Instagram API request failed: {}", match error {
+            ureq::Error::Status(code, _) => format!("HTTP {code}"),
+            _ => "network unavailable".into(),
+        }))?;
+    response.into_json().map_err(|_| "Instagram returned invalid JSON".into())
+}
+
+fn instagram_post(row: &serde_json::Value) -> LivePost {
+    LivePost {
+        id: row.get("id").and_then(|v| v.as_str()).unwrap_or("").into(),
+        platform: "instagram".into(),
+        caption: row.get("caption").and_then(|v| v.as_str()).unwrap_or("Instagram post").into(),
+        created_at: row.get("timestamp").and_then(|v| v.as_str()).unwrap_or("").into(),
+        media_url: row.get("thumbnail_url").and_then(|v| v.as_str())
+            .or_else(|| row.get("media_url").and_then(|v| v.as_str())).map(str::to_string),
+        permalink_url: row.get("permalink").and_then(|v| v.as_str()).map(str::to_string),
+        likes: get_i64(row.get("like_count")),
+        comments: get_i64(row.get("comments_count")),
+    }
+}
+
+fn fetch_direct_instagram_posts(token: &str, max_posts: usize) -> Result<Vec<LivePost>, String> {
+    let fields = "id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count";
+    let mut url = Some(format!(
+        "https://graph.instagram.com/me/media?fields={}&limit={}",
+        urlencoding::encode(fields), max_posts.clamp(1, 100)
+    ));
+    let mut results = Vec::new();
+    let mut pages = 0;
+    while let Some(next) = url.take() {
+        if results.len() >= max_posts || pages >= 8 { break; }
+        let parsed = url::Url::parse(&next).map_err(|_| "Invalid Instagram pagination".to_string())?;
+        if parsed.scheme() != "https" || parsed.host_str() != Some("graph.instagram.com") {
+            return Err("Instagram pagination returned an unexpected endpoint".into());
+        }
+        let data = fetch_json_bearer(&next, token)?;
+        if let Some(rows) = data.get("data").and_then(|v| v.as_array()) {
+            for row in rows {
+                results.push(instagram_post(row));
+                if results.len() >= max_posts { break; }
+            }
+        }
+        url = data.get("paging").and_then(|v| v.get("next"))
+            .and_then(|v| v.as_str()).map(str::to_string);
+        pages += 1;
+    }
+    Ok(results)
+}
+
+fn load_direct_instagram_workspace(app: &AppHandle, account: &crate::db::Account, ig_id: &str) -> LiveWorkspace {
+    let mut workspace = LiveWorkspace {
+        account_id: account.id.clone(),
+        name: account.name.clone(),
+        facebook_page_id: None,
+        facebook_followers: 0,
+        facebook_picture_url: None,
+        instagram_account_id: Some(ig_id.into()),
+        instagram_username: None,
+        instagram_followers: 0,
+        instagram_media_count: 0,
+        instagram_picture_url: None,
+        recent_posts: vec![],
+        status: "connected".into(),
+        error: None,
+    };
+    let token = match load_secret(app, &format!("instagram_direct_token_{ig_id}")) {
+        Ok(token) => token,
+        Err(_) => {
+            workspace.status = "token_error".into();
+            workspace.error = Some("Instagram login expired. Reconnect Instagram to refresh access.".into());
+            return workspace;
+        }
+    };
+    match fetch_json_bearer(
+        "https://graph.instagram.com/me?fields=id,username,name,followers_count,media_count,profile_picture_url",
+        &token
+    ) {
+        Ok(profile) => {
+            workspace.instagram_username = profile.get("username").and_then(|v| v.as_str()).map(str::to_string);
+            workspace.instagram_followers = get_i64(profile.get("followers_count"));
+            workspace.instagram_media_count = get_i64(profile.get("media_count"));
+            workspace.instagram_picture_url = profile.get("profile_picture_url").and_then(|v| v.as_str()).map(str::to_string);
+        }
+        Err(error) => {
+            workspace.status = "sync_error".into();
+            workspace.error = Some(error);
+            return workspace;
+        }
+    };
+    match fetch_direct_instagram_posts(&token, 12) {
+        Ok(posts) => workspace.recent_posts = posts,
+        Err(error) => workspace.error = Some(format!("Profile connected, but recent media could not be loaded: {error}")),
+    }
+    workspace
+}
+
 fn load_live_workspace(
     app: &AppHandle,
     api_version: &str,
@@ -869,7 +973,11 @@ fn load_live_workspace(
     };
 
     let Some(page_id) = account.facebook_page_id.as_deref() else {
+        if let Some(ig_id) = account.instagram_account_id.as_deref() {
+            return load_direct_instagram_workspace(app, account, ig_id);
+        }
         workspace.status = "disconnected".into();
+        workspace.error = Some("No connected Facebook Page or Instagram login for this workspace".into());
         return workspace;
     };
 
@@ -1152,6 +1260,12 @@ fn media_for_account(
 ) -> Vec<LivePost> {
     let mut items = Vec::new();
     let Some(page_id) = account.facebook_page_id.as_deref() else {
+        if let Some(ig_id) = account.instagram_account_id.as_deref() {
+            if let Ok(token) = load_secret(app, &format!("instagram_direct_token_{ig_id}")) {
+                return fetch_direct_instagram_posts(&token, per_account).unwrap_or_default()
+                    .into_iter().filter(|post| post.media_url.is_some()).collect();
+            }
+        }
         return items;
     };
     let Ok(token) = load_secret(app, &format!("meta_page_token_{page_id}")) else {
@@ -1998,4 +2112,22 @@ pub fn get_live_insights(
     .collect();
 
     Ok(LiveInsights { days, series })
+}
+
+#[cfg(test)]
+mod direct_instagram_tests {
+    use super::instagram_post;
+
+    #[test]
+    fn direct_instagram_media_maps_to_dashboard_post() {
+        let post = instagram_post(&serde_json::json!({
+            "id":"ig-123", "caption":"Test post", "timestamp":"2026-10-10T13:00:00Z",
+            "media_type":"IMAGE", "media_url":"https://example.org/image.jpg",
+            "permalink":"https://www.instagram.com/p/example", "like_count":5, "comments_count":2
+        }));
+        assert_eq!(post.platform, "instagram");
+        assert_eq!(post.caption, "Test post");
+        assert_eq!(post.media_url.as_deref(), Some("https://example.org/image.jpg"));
+        assert_eq!(post.likes, 5);
+    }
 }
