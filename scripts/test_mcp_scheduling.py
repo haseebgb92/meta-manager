@@ -49,6 +49,10 @@ try:
             time.sleep(.1)
     else:
         raise AssertionError("MCP test server did not start")
+    cloud = call("cloud_status", {})
+    assert "signedIn" in str(cloud), cloud
+    blocked = call("schedule_cloud_post", {"item_id":"invalid", "confirm":False})
+    assert blocked.get("isError"), "Unconfirmed cloud write must be blocked"
     li = call("create_post", {"account_id":"linkedin-demo", "title":"LinkedIn image/link test",
         "platform":"linkedin", "caption":"Test", "media_url":"https://example.org/image.jpg",
         "link_url":"https://example.org/article", "scheduled_for":"2026-11-20T15:00:00Z"})

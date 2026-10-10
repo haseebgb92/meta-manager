@@ -1,6 +1,7 @@
 mod db;
 mod instagram;
 mod hosting;
+mod cloud;
 mod linkedin;
 mod meta;
 mod oauth;
@@ -176,6 +177,40 @@ async fn research_public_meta(
 }
 
 #[tauri::command]
+fn get_cloud_status(app: tauri::AppHandle) -> cloud::CloudStatus { cloud::status(&app) }
+
+#[tauri::command]
+async fn cloud_send_code(app: tauri::AppHandle,email:String)->Result<(),String>{
+ tauri::async_runtime::spawn_blocking(move ||cloud::send_code(&app,email)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn cloud_verify_code(app: tauri::AppHandle,email:String,code:String)->Result<cloud::CloudStatus,String>{
+ tauri::async_runtime::spawn_blocking(move ||cloud::verify_code(&app,email,code)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn cloud_connect_account(app: tauri::AppHandle,account_id:String,provider:String)->Result<(),String>{
+ tauri::async_runtime::spawn_blocking(move ||cloud::connect_account(&app,account_id,provider)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn cloud_disconnect_account(app: tauri::AppHandle,account_id:String,provider:String)->Result<(),String>{
+ tauri::async_runtime::spawn_blocking(move ||cloud::disconnect_account(&app,account_id,provider)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn cloud_schedule_item(app: tauri::AppHandle,item_id:String)->Result<(),String>{
+ tauri::async_runtime::spawn_blocking(move ||cloud::schedule_item(&app,item_id)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn cloud_list_posts(app: tauri::AppHandle)->Result<Vec<cloud::CloudPost>,String>{
+ tauri::async_runtime::spawn_blocking(move ||cloud::list_cloud_posts(&app)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn cloud_upload_media(app: tauri::AppHandle,base64_data:String)->Result<hosting::HostedMedia,String>{
+ tauri::async_runtime::spawn_blocking(move ||cloud::upload_media(&app,base64_data)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+fn cloud_logout(app: tauri::AppHandle)->Result<(),String>{cloud::logout(&app)}
+
+#[tauri::command]
 fn get_media_host_status(app: tauri::AppHandle) -> Result<hosting::MediaHostStatus, String> {
     hosting::status(&app)
 }
@@ -287,6 +322,15 @@ pub fn run() {
             get_media_host_status,
             configure_media_host,
             upload_hosted_media,
+            get_cloud_status,
+            cloud_send_code,
+            cloud_verify_code,
+            cloud_connect_account,
+            cloud_disconnect_account,
+            cloud_schedule_item,
+            cloud_list_posts,
+            cloud_upload_media,
+            cloud_logout,
             get_live_insights,
             get_mcp_status,
             refresh_meta_accounts

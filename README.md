@@ -203,3 +203,7 @@ Meta Manager can host local images before publishing via an authorized WordPress
 4. After configuring hosting, ChatGPT can use the MCP **upload_media** tool for JPEG/PNG files in Downloads (`confirm=true` required), then schedule the returned media URL using `create_post`. Convert PNG to JPEG before Instagram publishing.
 
 The media library attachment is public. Use a site you administer. Keep a separate Application Password for Meta Manager so access can be revoked independently. Local scheduling still requires the desktop app to be running; a hosted 24/7 scheduling service would need an additional authenticated cloud queue and server-side tokens.
+
+## Free Cloud Publishing (v0.1.14)
+
+Meta Manager supports an optional, free, minute-level publishing worker in the existing Supabase Free project. It is opt-in for each social account, uses encrypted credentials in Supabase Vault-backed PostgreSQL, and hosts images in Supabase Storage. No upgrade or paid add-on is required. The existing Vercel OAuth broker remains unchanged. Read cloud/README.md for setup, limits and how to revoke connections.

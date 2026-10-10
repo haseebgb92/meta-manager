@@ -22,6 +22,12 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import {
+  getCloudStatus, cloudSendCode, cloudVerifyCode, cloudConnectAccount,
+  cloudScheduleItem, cloudListPosts, cloudUploadMedia, cloudLogout, cloudDisconnectAccount,
+  type CloudStatus, type CloudPost,
+} from "./cloudApi";
+
+import {
   createAccount,
   configureMediaHost,
   getMediaHostStatus,
@@ -178,6 +184,14 @@ function App() {
   const [mediaHostMessage, setMediaHostMessage] = useState("");
   const [savingMediaHost, setSavingMediaHost] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState<CloudStatus | null>(null);
+  const [cloudEmail, setCloudEmail] = useState("");
+  const [cloudCode, setCloudCode] = useState("");
+  const [cloudMessage, setCloudMessage] = useState("");
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [cloudMode, setCloudMode] = useState(true);
+  const [cloudPosts, setCloudPosts] = useState<CloudPost[]>([]);
+
   const [publishingId, setPublishingId] = useState<string | null>(null);
   const [savingComposer, setSavingComposer] = useState(false);
   const [composerMessage, setComposerMessage] = useState("");
@@ -217,6 +231,10 @@ function App() {
     }).catch(() => null);
     getLinkedInStatus().then(setLinkedInStatus).catch(() => null);
     getInstagramStatus().then(setInstagramStatus).catch(() => null);
+    getCloudStatus().then((cloud) => {
+      setCloudStatus(cloud); setCloudEmail(cloud.email);
+      if (cloud.signedIn) cloudListPosts().then(setCloudPosts).catch(() => null);
+    }).catch(() => null);
     getMediaHostStatus().then((host) => {
       setMediaHostStatus(host);
       setMediaHostUrl(host.siteUrl);
@@ -432,7 +450,7 @@ function App() {
   const queueCalendarItems = calendarItems.filter((item) => item.status !== "published");
   const locallyPublishedItems = calendarItems.filter((item) => item.status === "published");
   const localPublishedItems = locallyPublishedItems.filter((item) => !(liveDashboard?.recentPosts ?? []).some((post) => item.publishedPostId?.includes(post.id)));
-  const scheduledCount = queueCalendarItems.filter((item) => item.status === "scheduled").length;
+  const scheduledCount = queueCalendarItems.filter((item) => ["scheduled","cloud_scheduled"].includes(item.status)).length;
   const draftCount = queueCalendarItems.filter((item) => item.status === "draft").length;
   const linkedinPublishedItems = localPublishedItems.filter((item) => item.platform === "linkedin");
   const selectedLinkedInAccount = selectedAccount?.status === "linkedin_connected"
@@ -516,6 +534,50 @@ function App() {
     }
   }
 
+  async function sendCloudCode() {
+    setCloudBusy(true); setCloudMessage("");
+    try {
+      await cloudSendCode(cloudEmail.trim());
+      setCloudMessage("Check email. Paste the sign-in link without opening it, or enter a 6-digit code if provided.");
+    } catch (e) {setCloudMessage(String(e))}
+    finally {setCloudBusy(false)}
+  }
+  async function verifyCloudCode() {
+    setCloudBusy(true); setCloudMessage("");
+    try {
+      const cloud = await cloudVerifyCode(cloudEmail.trim(), cloudCode.trim());
+      setCloudStatus(cloud); setCloudCode(""); setCloudMessage("Cloud sign-in complete.");
+      cloudListPosts().then(setCloudPosts).catch(() => null);
+    } catch (e) {setCloudMessage(String(e))}
+    finally {setCloudBusy(false)}
+  }
+  async function enrollCloudAccount(accountId: string, provider: "facebook" | "instagram" | "linkedin") {
+    setCloudBusy(true);setCloudMessage("");
+    try {
+      await cloudConnectAccount(accountId,provider);
+      setCloudMessage("Cloud publishing enabled for "+provider+". Publishing credentials are encrypted server-side.");
+    } catch(e){setCloudMessage(String(e))}
+    finally {setCloudBusy(false)}
+  }
+  async function revokeCloudAccount(accountId:string,provider:"facebook"|"instagram"|"linkedin"){
+    setCloudBusy(true);setCloudMessage("");
+    try {await cloudDisconnectAccount(accountId,provider);setCloudMessage(provider+" cloud access revoked; pending jobs cancelled.");}
+    catch(e){setCloudMessage(String(e))}
+    finally{setCloudBusy(false)}
+  }
+  async function refreshCloudPosts() {
+    setCloudBusy(true); setCloudMessage("");
+    try {setCloudPosts(await cloudListPosts())}
+    catch(e){setCloudMessage(String(e))}
+    finally {setCloudBusy(false)}
+  }
+  async function signOutCloud() {
+    setCloudBusy(true);
+    try {await cloudLogout(); setCloudStatus(await getCloudStatus()); setCloudPosts([]); setCloudMessage("Signed out locally. Revoke cloud account connections separately if needed.")}
+    catch(e){setCloudMessage(String(e))}
+    finally {setCloudBusy(false)}
+  }
+
   async function handleSaveMediaHost() {
     if (savingMediaHost) return;
     setSavingMediaHost(true);
@@ -538,7 +600,7 @@ function App() {
       setComposerMessage("Maximum image size is 10 MB.");
       return;
     }
-    if (!mediaHostStatus?.configured) {
+    if (!mediaHostStatus?.configured && !cloudStatus?.signedIn) {
       setComposerMessage("Configure WordPress Media Hosting in Settings first.");
       return;
     }
@@ -562,7 +624,7 @@ function App() {
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       const base64Data = canvas.toDataURL("image/jpeg", 0.87).split(",")[1];
-      const uploaded = await uploadHostedMedia(base64Data, file.name);
+      const uploaded = cloudStatus?.signedIn ? await cloudUploadMedia(base64Data) : await uploadHostedMedia(base64Data, file.name);
       setComposerMediaUrl(uploaded.url);
       setComposerMessage(uploaded.note);
     } catch (error) {
@@ -611,19 +673,26 @@ function App() {
     setSavingComposer(true);
     setComposerMessage("");
     try {
+      const useCloud = status === "scheduled" && !!cloudStatus?.signedIn && cloudMode;
       const item = await saveCalendarItem({
         accountId: account.id,
         title: composerTitle.trim(),
         platform: composerPlatform,
-        status,
+        status: useCloud ? "draft" : status,
         caption: composerCaption.trim() || null,
         hashtags: composerHashtags.split(/[\s,]+/).map((tag) => tag.trim().replace(/^#/, "")).filter(Boolean),
         scheduledFor: status === "scheduled" && composerSchedule ? new Date(composerSchedule).toISOString() : null,
         mediaUrl: composerMediaUrl.trim() || null,
         linkUrl: composerLinkUrl.trim() || null,
       });
-      setCalendarItems((current) => [...current.filter((existing) => existing.id !== item.id), item]);
-      setComposerMessage(status === "scheduled" ? "Post scheduled locally." : "Draft saved locally.");
+      if (useCloud) {
+        await cloudScheduleItem(item.id);
+        setCalendarItems((current) => [...current.filter((existing) => existing.id !== item.id), {...item, status: "cloud_scheduled"}]);
+        void cloudListPosts().then(setCloudPosts).catch(() => null);
+      } else {
+        setCalendarItems((current) => [...current.filter((existing) => existing.id !== item.id), item]);
+      }
+      setComposerMessage(status === "scheduled" ? (useCloud ? "Cloud post scheduled — your computer can be off." : "Post scheduled locally.") : "Draft saved locally.");
       setComposerTitle("");
       setComposerCaption("");
       setComposerSchedule("");
@@ -997,7 +1066,37 @@ function App() {
         {activeNav === "Settings" && (
           <section className="page-panel">
             <div className="page-title-row"><div><span className="eyebrow">LOCAL CONFIGURATION</span><h2>Settings</h2><p>Meta connection, local storage and publishing service status.</p></div></div>
-            <div className="settings-grid"><article className="card settings-card"><h3>Meta / Facebook</h3><div><span>App ID</span><code>{metaConfig?.appId ?? "1079289208340048"}</code></div><div><span>Credential source</span><b>Managed securely by backend</b></div><div><span>Graph version</span><code>{metaConfig?.apiVersion ?? "v23.0"}</code></div><small className="settings-help">No App Secret setup is required on this computer. Install Meta Manager anywhere and connect accounts with OAuth.</small></article><article className="card settings-card linkedin-settings"><h3>Instagram Professional</h3><div><span>Connection type</span><b>Direct Instagram Login</b></div><div><span>Instagram App ID</span><code>{instagramStatus?.appId ?? "2228119617760136"}</code></div><div><span>Credential source</span><b>Managed securely by backend</b></div><div><span>OAuth callback</span><code>{instagramStatus?.redirectUri ?? "https://127.0.0.1:38937/oauth/instagram/callback"}</code></div><div className="linkedin-actions"><button className="linkedin-connect" onClick={handleConnectInstagram}>{connectingInstagram ? "Open Instagram login" : "Connect Instagram"}</button></div>{instagramMessage ? <p className="setup-message linkedin-message">{instagramMessage}</p> : null}<small className="settings-help">No Instagram App Secret is stored in the desktop installation.</small></article><article className="card settings-card linkedin-settings"><h3>LinkedIn</h3><div><span>Personal posting app</span><b>Advertpreneur Social Manager</b></div><div><span>Client ID</span><code>{linkedInStatus?.personalClientId ?? "77drthb7h6mp7m"}</code></div><div><span>Credential source</span><b>Managed securely by backend</b></div><div><span>OAuth callback</span><code>{linkedInStatus?.personalRedirectUri ?? "http://127.0.0.1:38937/oauth/linkedin/callback"}</code></div><div className="linkedin-actions"><button className="linkedin-connect" onClick={handleConnectLinkedIn}>{connectingLinkedIn ? "Restart connection" : "Connect personal account"}</button></div>{linkedInMessage ? <p className="setup-message linkedin-message">{linkedInMessage}</p> : null}<div className="linkedin-member-list">{(linkedInStatus?.accounts ?? []).map((account)=><div key={account.id}><span className="linkedin-avatar">{account.pictureUrl ? <img src={account.pictureUrl} alt=""/> : initials(account.name)}</span><span><b>{account.name}</b><small>{account.email || "LinkedIn member"}</small></span><em>Connected</em></div>)}{!(linkedInStatus?.accounts.length) ? <small>No personal LinkedIn accounts connected yet.</small> : null}</div><hr/><div><span>Company Page app</span><b>Advertpreneur Page Publishing</b></div><div><span>Company client ID</span><code>{linkedInStatus?.companyClientId ?? "77uxxsydc367ll"}</code></div><div><span>Associated Page</span><b>{linkedInStatus?.companyPage ?? "advertpreneur"}</b></div><div><span>Community Management</span><b className="status-pending">Awaiting approval</b></div><small className="settings-help">Company Page publishing stays feature-gated until LinkedIn approves Community Management API access.</small></article><article className="card settings-card">
+            <div className="settings-grid"><article className="card settings-card"><h3>Meta / Facebook</h3><div><span>App ID</span><code>{metaConfig?.appId ?? "1079289208340048"}</code></div><div><span>Credential source</span><b>Managed securely by backend</b></div><div><span>Graph version</span><code>{metaConfig?.apiVersion ?? "v23.0"}</code></div><small className="settings-help">No App Secret setup is required on this computer. Install Meta Manager anywhere and connect accounts with OAuth.</small></article><article className="card settings-card linkedin-settings"><h3>Instagram Professional</h3><div><span>Connection type</span><b>Direct Instagram Login</b></div><div><span>Instagram App ID</span><code>{instagramStatus?.appId ?? "2228119617760136"}</code></div><div><span>Credential source</span><b>Managed securely by backend</b></div><div><span>OAuth callback</span><code>{instagramStatus?.redirectUri ?? "https://127.0.0.1:38937/oauth/instagram/callback"}</code></div><div className="linkedin-actions"><button className="linkedin-connect" onClick={handleConnectInstagram}>{connectingInstagram ? "Open Instagram login" : "Connect Instagram"}</button></div>{instagramMessage ? <p className="setup-message linkedin-message">{instagramMessage}</p> : null}<small className="settings-help">No Instagram App Secret is stored in the desktop installation.</small></article><article className="card settings-card linkedin-settings"><h3>LinkedIn</h3><div><span>Personal posting app</span><b>Advertpreneur Social Manager</b></div><div><span>Client ID</span><code>{linkedInStatus?.personalClientId ?? "77drthb7h6mp7m"}</code></div><div><span>Credential source</span><b>Managed securely by backend</b></div><div><span>OAuth callback</span><code>{linkedInStatus?.personalRedirectUri ?? "http://127.0.0.1:38937/oauth/linkedin/callback"}</code></div><div className="linkedin-actions"><button className="linkedin-connect" onClick={handleConnectLinkedIn}>{connectingLinkedIn ? "Restart connection" : "Connect personal account"}</button></div>{linkedInMessage ? <p className="setup-message linkedin-message">{linkedInMessage}</p> : null}<div className="linkedin-member-list">{(linkedInStatus?.accounts ?? []).map((account)=><div key={account.id}><span className="linkedin-avatar">{account.pictureUrl ? <img src={account.pictureUrl} alt=""/> : initials(account.name)}</span><span><b>{account.name}</b><small>{account.email || "LinkedIn member"}</small></span><em>Connected</em></div>)}{!(linkedInStatus?.accounts.length) ? <small>No personal LinkedIn accounts connected yet.</small> : null}</div><hr/><div><span>Company Page app</span><b>Advertpreneur Page Publishing</b></div><div><span>Company client ID</span><code>{linkedInStatus?.companyClientId ?? "77uxxsydc367ll"}</code></div><div><span>Associated Page</span><b>{linkedInStatus?.companyPage ?? "advertpreneur"}</b></div><div><span>Community Management</span><b className="status-pending">Awaiting approval</b></div><small className="settings-help">Company Page publishing stays feature-gated until LinkedIn approves Community Management API access.</small></article><article className="card settings-card cloud-settings">
+              <h3>Cloud Publishing — Free</h3>
+              <p>Uses the existing Supabase Free project. Posts publish through the minute-level cloud worker even when this computer is offline. No existing accounts are transferred automatically.</p>
+              {!cloudStatus?.signedIn ? <>
+                <label><span>Email sign-in</span><input type="email" value={cloudEmail} onChange={(e)=>setCloudEmail(e.target.value)} placeholder="Email address" /></label>
+                <button className="primary-page-button" disabled={cloudBusy || !cloudEmail.includes("@")} onClick={()=>void sendCloudCode()}>Email a verification code</button>
+                <label><span>Verification code or email link</span><input inputMode="numeric" value={cloudCode} onChange={(e)=>setCloudCode(e.target.value)} placeholder="Paste email sign-in URL or 6-digit code" /></label>
+                <button className="secondary-page-button" disabled={cloudBusy || !cloudCode.trim()} onClick={()=>void verifyCloudCode()}>Verify email and sign in</button>
+              </> : <>
+                <div><span>Signed in</span><b>{cloudStatus.email}</b></div>
+                <p>Enable each account explicitly. This stores an encrypted publishing token on the cloud backend so the scheduler works while the desktop is closed.</p>
+                <div className="cloud-account-list">
+                  {localAccounts.flatMap((acct)=>{
+                    const platforms: ("facebook"|"instagram"|"linkedin")[] = acct.status==="linkedin_connected"
+                      ? ["linkedin"] : [
+                        ...(acct.facebookPageId?["facebook" as const]:[]),
+                        ...(acct.instagramAccountId?["instagram" as const]:[])
+                      ];
+                    return platforms.map((provider)=><div key={acct.id+"-"+provider} className="cloud-account-actions"><button className="secondary-page-button" disabled={cloudBusy} onClick={()=>void enrollCloudAccount(acct.id,provider)}>Enable · {acct.name} · {provider}</button><button className="secondary-page-button" disabled={cloudBusy} onClick={()=>void revokeCloudAccount(acct.id,provider)}>Revoke</button></div>);
+                  })}
+                </div>
+                <button className="secondary-page-button" disabled={cloudBusy} onClick={()=>void refreshCloudPosts()}>Refresh cloud queue</button>
+                <div className="cloud-job-list">
+                  {cloudPosts.slice(0,12).map((post)=><div key={post.id}><b>{post.title}</b><small>{post.provider} · {post.status} · {new Date(post.scheduledFor).toLocaleString()}</small>{post.lastError?<small>{post.lastError}</small>:null}</div>)}
+                  {!cloudPosts.length?<small>No cloud posts yet.</small>:null}
+                </div>
+                <button className="secondary-page-button" disabled={cloudBusy} onClick={()=>void signOutCloud()}>Sign out on this computer</button>
+              </>}
+              {cloudMessage?<p className="setup-message">{cloudMessage}</p>:null}
+              <small className="settings-help">Free-tier safeguards: 200 pending posts maximum per account, 10 MB images, and no paid plan required. Verify provider permissions before scheduling.</small>
+            </article><article className="card settings-card">
               <h3>Media Hosting — WordPress</h3>
               <p>Automatically upload local images and generate an Instagram-compatible public URL.</p>
               <label><span>WordPress website</span><input value={mediaHostUrl} onChange={(e) => setMediaHostUrl(e.target.value)} placeholder="https://your-site.com" /></label>
@@ -1070,10 +1169,11 @@ function App() {
               <label className="composer-full"><span>Caption</span><textarea value={composerCaption} onChange={(event) => setComposerCaption(event.target.value)} placeholder="Write the post caption…" rows={8}/></label>
               <label className="composer-full"><span>Hashtags</span><input value={composerHashtags} onChange={(event) => setComposerHashtags(event.target.value)} placeholder="#webdevelopment #shopify #ecommerce" /></label>
               <label className="composer-full"><span>Image URL <small>{composerPlatform === "instagram" || composerPlatform === "both" ? "Public HTTPS image required. Local files cannot be published by Instagram until hosted online." : "Optional public HTTPS image"}</small></span><input value={composerMediaUrl} onChange={(event) => setComposerMediaUrl(event.target.value)} placeholder="https://your-site.com/image.jpg" /></label>
-              <label className="composer-full"><span>Upload Local Image</span><input type="file" accept="image/jpeg,image/png,image/webp" disabled={uploadingMedia} onChange={(event) => { void handleLocalImage(event.target.files?.[0]); event.target.value = ""; }} /><small>{uploadingMedia ? "Converting and uploading…" : mediaHostStatus?.configured ? "Uploads to your WordPress media library and fills the public image URL." : "Enable WordPress Media Hosting in Settings first."}</small></label>
+              <label className="composer-full"><span>Upload Local Image</span><input type="file" accept="image/jpeg,image/png,image/webp" disabled={uploadingMedia} onChange={(event) => { void handleLocalImage(event.target.files?.[0]); event.target.value = ""; }} /><small>{uploadingMedia ? "Converting and uploading…" : cloudStatus?.signedIn ? "Uploads to Supabase free storage and automatically fills the public URL." : mediaHostStatus?.configured ? "Uploads to your WordPress media library." : "Connect Cloud or configure WordPress Media Hosting in Settings."}</small></label>
               {composerMediaUrl.startsWith("https://") ? <div className="composer-full" style={{display:"flex",gap:12,alignItems:"center"}}><img src={composerMediaUrl} alt="Post image preview" style={{width:76,height:76,objectFit:"cover",borderRadius:12}} /><small>Hosted image</small></div> : null}
               <label className="composer-full"><span>Link URL <small>LinkedIn article preview or clickable link in image post</small></span><input value={composerLinkUrl} onChange={(event) => setComposerLinkUrl(event.target.value)} placeholder="https://advertpreneur.com/your-article" /></label>
-              <label className="composer-full"><span>Schedule</span><input type="datetime-local" value={composerSchedule} onChange={(event) => setComposerSchedule(event.target.value)} /><small>Keep Meta Manager running at publishing time.</small></label>
+              {cloudStatus?.signedIn ? <label className="composer-full cloud-schedule-option"><span><input type="checkbox" checked={cloudMode} onChange={(e)=>setCloudMode(e.target.checked)} /> Publish using free Cloud Scheduler (works with computer off)</span><small>Enable the selected social account under Settings → Cloud Publishing first.</small></label> : null}
+              <label className="composer-full"><span>Schedule</span><input type="datetime-local" value={composerSchedule} onChange={(event) => setComposerSchedule(event.target.value)} /><small>{cloudStatus?.signedIn && cloudMode ? "Cloud worker checks posts each minute; no desktop required." : "Keep Meta Manager running for local scheduling."}</small></label>
             </div>
             {composerMessage ? <p className="setup-message">{composerMessage}</p> : null}
             <div className="composer-actions"><button className="secondary" disabled={savingComposer} onClick={() => handleSaveComposer("draft")}>Save draft</button><button className="primary" disabled={savingComposer || uploadingMedia} onClick={() => handleSaveComposer("scheduled")}>{savingComposer ? "Saving…" : "Schedule post"}</button></div>

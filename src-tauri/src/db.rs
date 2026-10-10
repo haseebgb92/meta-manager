@@ -425,6 +425,15 @@ pub fn get_calendar_item(app: &AppHandle, id: &str) -> Result<Option<CalendarIte
         .map_err(|e| e.to_string())
 }
 
+pub fn mark_calendar_cloud_scheduled(app:&AppHandle,id:&str)->Result<(),String>{
+ let connection=conn(app)?;
+ let changed=connection.execute(
+   "UPDATE calendar_items SET status='cloud_scheduled',updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND status='draft'",[id]
+ ).map_err(|e|e.to_string())?;
+ if changed!=1{return Err("Draft could not be converted to cloud scheduling".into())}
+ Ok(())
+}
+
 pub fn mark_calendar_partial(app: &AppHandle, id: &str, published_post_id: &str) -> Result<(), String> {
     let connection = conn(app)?;
     connection.execute("UPDATE calendar_items SET published_post_id=?2, updated_at=CURRENT_TIMESTAMP WHERE id=?1",

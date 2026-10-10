@@ -334,8 +334,158 @@ async function hostLocalImage(filePath) {
     note:jpg?"Hosted JPEG is ready to schedule":"PNG uploaded. Convert to JPEG for the most reliable Instagram publishing"};
 }
 
+const CLOUD_ROOT="https://hwhioqvsxazyxziyrhdg.supabase.co";
+const CLOUD_ENDPOINT=CLOUD_ROOT+"/functions/v1/meta-manager-cloud";
+const CLOUD_PUBLIC_KEY="sb_publishable_nukcv3u9TU4TGx24cilYIQ_wYJAQqjv";
+function writeCloudSecret(name,value){
+ if(typeof value!=="string"||value.length<12)throw new Error("Cloud returned an invalid session");
+ fs.mkdirSync(SECRET_DIR,{recursive:true,mode:0o700});
+ fs.writeFileSync(path.join(SECRET_DIR,name+".secret"),value,{encoding:"utf8",mode:0o600});
+}
+async function refreshCloudSession(){
+ const current=readSecret("mm_cloud_refresh_token");
+ if(current==="signed_out")throw new Error("Cloud sign-in is required");
+ const response=await fetch(CLOUD_ROOT+"/auth/v1/token?grant_type=refresh_token",{
+  method:"POST",headers:{"content-type":"application/json","apikey":CLOUD_PUBLIC_KEY},
+  body:JSON.stringify({refresh_token:current}),signal:AbortSignal.timeout(14000)
+ });
+ if(!response.ok)throw new Error("Cloud login expired; sign in to Meta Manager under Settings");
+ const result=await response.json();
+ writeCloudSecret("mm_cloud_access_token",result.access_token);
+ writeCloudSecret("mm_cloud_refresh_token",result.refresh_token);
+ return result.access_token;
+}
+async function cloudCall(body){
+ let token=readSecret("mm_cloud_access_token");
+ if(token==="signed_out")throw new Error("Sign in under Settings → Cloud Publishing");
+ const send=(value)=>fetch(CLOUD_ENDPOINT,{
+  method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+value},
+  body:JSON.stringify(body),signal:AbortSignal.timeout(25000)
+ });
+ let response=await send(token);
+ if(response.status===401){token=await refreshCloudSession();response=await send(token);}
+ const result=await response.json();
+ if(!response.ok)throw new Error(typeof result.error==="string"?result.error:"Cloud request failed");
+ return result;
+}
+function cloudDestinations(item){
+ const account=getAccount(item.account_id);
+ if(!account)throw new Error("Selected local account not found");
+ const destinations=item.platform==="both"?["facebook","instagram"]:[item.platform];
+ return destinations.map(provider=>{
+  let remoteAccountId,providerMode="standard";
+  if(provider==="facebook"){
+   remoteAccountId=account.facebookPageId;
+  }else if(provider==="instagram"){
+   remoteAccountId=account.instagramAccountId;
+   if(remoteAccountId&&fs.existsSync(path.join(SECRET_DIR,"instagram_direct_token_"+remoteAccountId+".secret")))providerMode="instagram_direct";
+  }else if(provider==="linkedin"){
+   const linkedin=rows("SELECT member_id FROM linkedin_accounts WHERE id=?",[account.id])[0];
+   remoteAccountId=linkedin?.member_id;
+  }else throw new Error("Unsupported cloud platform");
+  if(!remoteAccountId)throw new Error("The selected account is not connected to "+provider);
+  return {provider,remoteAccountId,providerMode};
+ });
+}
+async function enqueueCloudLocalItem(itemId){
+ const item=rows("SELECT * FROM calendar_items WHERE id=?",[itemId])[0];
+ if(!item)throw new Error("Local post not found");
+ if(!["draft","scheduled"].includes(item.status))throw new Error("This post is already published, failed or cloud-scheduled");
+ const time=Date.parse(item.scheduled_for||"");
+ if(!Number.isFinite(time)||time<Date.now()+180000)throw new Error("Cloud posts must be at least 3 minutes in the future");
+ const providers=cloudDestinations(item);
+ for(const p of providers){
+  const ready=await cloudCall({action:"connection_status",accountId:item.account_id,provider:p.provider});
+  if(ready.connected!==true)throw new Error("Enable "+p.provider+" cloud publishing in Settings before scheduling");
+ }
+ const scheduled=[];
+ try{
+  for(const p of providers){
+   const result=await cloudCall({
+    action:"schedule",accountId:item.account_id,sourceId:item.id,
+    provider:p.provider,remoteAccountId:p.remoteAccountId,providerMode:p.providerMode,
+    title:item.title,caption:item.caption||"",hashtags:JSON.parse(item.hashtags||"[]"),
+    mediaUrl:item.media_url,linkUrl:item.link_url,scheduledFor:item.scheduled_for
+   });
+   scheduled.push({provider:p.provider,id:result.post?.id});
+  }
+  const updated=run("UPDATE calendar_items SET status='cloud_scheduled',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('draft','scheduled')",[itemId]);
+  if(updated.changes!==1)throw new Error("Cloud post queued, but local status could not be updated");
+  return {sourceItemId:itemId,mode:"cloud",scheduled,computerRequired:false};
+ }catch(error){
+  // Prevent a partially scheduled Facebook+Instagram item when one provider fails.
+  await cloudCall({action:"cancel_source",sourceId:itemId}).catch(()=>null);
+  throw error;
+ }
+}
+async function uploadCloudFile(filePath){
+ const base=fs.realpathSync(path.join(os.homedir(),"Downloads"));
+ const candidate=fs.realpathSync(filePath);
+ const rel=path.relative(base,candidate);
+ if(!rel||rel.startsWith("..")||path.isAbsolute(rel))throw new Error("Use an image from Downloads");
+ const stat=fs.statSync(candidate);
+ if(!stat.isFile()||stat.size<64||stat.size>10*1024*1024)throw new Error("JPEG must be smaller than 10 MB");
+ const bytes=fs.readFileSync(candidate);
+ if(bytes[0]!==255||bytes[1]!==216||bytes[2]!==255)throw new Error("Convert the image to JPEG first");
+ const {userId}=await cloudCall({action:"status"});
+ if(!/^[0-9a-f-]{36}$/i.test(userId))throw new Error("Cloud user unavailable");
+ const storagePath=userId+"/"+crypto.randomUUID()+".jpg";
+ const target=CLOUD_ROOT+"/storage/v1/object/mm-public-media/"+storagePath;
+ const send=(token)=>fetch(target,{method:"POST",headers:{
+  "Content-Type":"image/jpeg","Authorization":"Bearer "+token,"apikey":CLOUD_PUBLIC_KEY,"x-upsert":"false"
+ },body:bytes,signal:AbortSignal.timeout(45000)});
+ let response=await send(readSecret("mm_cloud_access_token"));
+ if(response.status===401)response=await send(await refreshCloudSession());
+ if(!response.ok)throw new Error("Cloud image upload failed HTTP "+response.status);
+ return {mediaUrl:CLOUD_ROOT+"/storage/v1/object/public/mm-public-media/"+storagePath,
+  note:"JPEG uploaded to free cloud storage",size:bytes.length};
+}
 function getServer() {
   const server = new McpServer({ name: "meta-manager", version: "0.1.12" });
+  server.registerTool("cloud_status", {
+    description:"Check whether this local Meta Manager installation is signed into the free cloud scheduler. Does not expose tokens.",
+    inputSchema:{}
+  },async()=>{
+    let signedIn=false;try{signedIn=readSecret("mm_cloud_access_token")!=="signed_out"}catch{}
+    return textResult({signedIn,endpoint:CLOUD_ENDPOINT,freePlan:true});
+  });
+  server.registerTool("list_cloud_posts", {
+    description:"List the signed-in owner's scheduled, published and needs-review posts from the free cloud queue.",
+    inputSchema:{}
+  },async()=>textResult(await cloudCall({action:"list"})));
+  server.registerTool("schedule_cloud_post", {
+    description:"Move a pre-existing draft or scheduled local post to the cloud queue. Cloud scheduling runs while the computer is off. Requires explicit confirmation and per-platform cloud connections.",
+    inputSchema:{item_id:z.string(),confirm:z.boolean()}
+  },async({item_id,confirm})=>{
+    if(!confirm)throw new Error("Cloud scheduling requires confirm=true");
+    return textResult(await enqueueCloudLocalItem(item_id));
+  });
+  server.registerTool("create_cloud_post", {
+    description:"Create and queue one cloud-scheduled social post. Works without the desktop running after queuing. Requires cloud login and connected publishing credentials.",
+    inputSchema:{
+      account_id:z.string(),title:z.string().min(1),platform:z.enum(["facebook","instagram","both","linkedin"]),
+      caption:z.string().optional(),hashtags:z.array(z.string()).optional(),media_url:z.string().url().optional(),
+      link_url:z.string().url().optional(),scheduled_for:z.string(),confirm:z.boolean()
+    }
+  },async({account_id,title,platform,caption="",hashtags=[],media_url,link_url,scheduled_for,confirm})=>{
+    if(!confirm)throw new Error("Cloud scheduling requires confirm=true");
+    const account=getAccount(account_id);
+    if(!account)throw new Error("Account not found");
+    if(Date.parse(scheduled_for)<Date.now()+180000||!Number.isFinite(Date.parse(scheduled_for)))throw new Error("Schedule at least 3 minutes in the future");
+    if((platform==="instagram"||platform==="both")&&!/^https:\/\//.test(media_url||""))throw new Error("Instagram needs public HTTPS image");
+    const uuid=crypto.randomUUID();
+    run("INSERT INTO calendar_items(id,account_id,title,platform,status,caption,hashtags,media_url,link_url,scheduled_for,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+      [uuid,account_id,title,platform,"draft",caption,JSON.stringify(hashtags),media_url||null,link_url||null,new Date(scheduled_for).toISOString()]);
+    return textResult(await enqueueCloudLocalItem(uuid));
+  });
+  server.registerTool("upload_cloud_media", {
+    description:"Upload an image from Downloads to the free Supabase public storage bucket. Requires explicit confirmation. JPEG only, max 10 MB.",
+    inputSchema:{file_path:z.string(),confirm:z.boolean()}
+  },async({file_path,confirm})=>{
+    if(!confirm)throw new Error("Cloud image upload requires confirm=true");
+    return textResult(await uploadCloudFile(file_path));
+  });
+
   server.registerTool("list_accounts", { description: "List Meta Manager workspaces and linked Facebook/Instagram IDs without exposing tokens.", inputSchema: {} }, async()=>textResult(listAccounts()));
   server.registerTool("get_account_dashboard", { description: "Get live audience data and recent posts for one workspace or all connected workspaces.", inputSchema: { account_id: z.string().optional() } }, async({account_id})=>{
     const accounts = account_id ? [getAccount(account_id)].filter(Boolean) : listAccounts().filter((a)=>a.status==="connected");
