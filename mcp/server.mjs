@@ -430,24 +430,23 @@ async function uploadCloudFile(filePath){
  if(!stat.isFile()||stat.size<64||stat.size>10*1024*1024)throw new Error("JPEG must be smaller than 10 MB");
  const bytes=fs.readFileSync(candidate);
  if(bytes[0]!==255||bytes[1]!==216||bytes[2]!==255)throw new Error("Convert the image to JPEG first");
- const {userId}=await cloudCall({action:"status"});
- if(!/^[0-9a-f-]{36}$/i.test(userId))throw new Error("Cloud user unavailable");
- const storagePath=userId+"/"+crypto.randomUUID()+".jpg";
- const target=CLOUD_ROOT+"/storage/v1/object/mm-public-media/"+storagePath;
- const send=(token)=>fetch(target,{method:"POST",headers:{
-  "Content-Type":"image/jpeg","Authorization":"Bearer "+token,"apikey":CLOUD_PUBLIC_KEY,"x-upsert":"false"
- },body:bytes,signal:AbortSignal.timeout(45000)});
- let response=await send(readSecret("mm_cloud_access_token"));
- if(response.status===401){
-  if(readSecret("mm_cloud_access_token").startsWith("mmc_")) throw new Error("Reconnect Cloud in Settings.");
-  response=await send(await refreshCloudSession());
- }
- if(!response.ok)throw new Error("Cloud image upload failed HTTP "+response.status);
- return {mediaUrl:CLOUD_ROOT+"/storage/v1/object/public/mm-public-media/"+storagePath,
-  note:"JPEG uploaded to free cloud storage",size:bytes.length};
+ const prepared=await cloudCall({action:"prepare_media_upload"});
+ const signed=new URL(prepared.uploadUrl);
+ const publicUrl=new URL(prepared.mediaUrl);
+ if(signed.protocol!=="https:"||signed.hostname!=="hwhioqvsxazyxziyrhdg.supabase.co"||
+   !signed.pathname.startsWith("/storage/v1/object/upload/sign/mm-public-media/")||
+   publicUrl.protocol!=="https:"||publicUrl.hostname!==signed.hostname||
+   !publicUrl.pathname.startsWith("/storage/v1/object/public/mm-public-media/"))
+   throw new Error("Cloud returned an untrusted media endpoint");
+ const response=await fetch(prepared.uploadUrl,{
+   method:"PUT",headers:{"Content-Type":"image/jpeg","x-upsert":"false"},
+   body:bytes,signal:AbortSignal.timeout(45000)
+ });
+ if(!response.ok)throw new Error("Cloud JPEG upload failed (HTTP "+response.status+")");
+ return {mediaUrl:prepared.mediaUrl,note:"JPEG uploaded to free cloud storage",size:bytes.length};
 }
 function getServer() {
-  const server = new McpServer({ name: "meta-manager", version: "0.1.12" });
+  const server = new McpServer({ name: "meta-manager", version: "0.1.16" });
   server.registerTool("cloud_status", {
     description:"Check whether this local Meta Manager installation is signed into the free cloud scheduler. Does not expose tokens.",
     inputSchema:{}

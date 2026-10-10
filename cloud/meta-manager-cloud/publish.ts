@@ -31,7 +31,7 @@ async function facebook(p:CloudPost,token:string){
 }
 async function instagram(p:CloudPost,token:string){
  if(!p.media_url)throw new Error("An Instagram image is required");
- const base=p.provider_mode==="instagram_direct"?"https://graph.instagram.com/v23.0/":"https://graph.facebook.com/v23.0/";
+ const base=p.provider_mode==="instagram_direct"?"https://graph.instagram.com/":"https://graph.facebook.com/v23.0/";
  const acct=id(p.remote_account_id);
  const created=await request(base+acct+"/media",token,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},
   body:new URLSearchParams({image_url:p.media_url,caption:text(p)})});

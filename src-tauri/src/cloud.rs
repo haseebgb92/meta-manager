@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tauri::{AppHandle,Manager};
-use uuid::Uuid;
 
 use crate::{db, hosting, meta};
 
@@ -269,24 +268,25 @@ pub fn upload_media(app:&AppHandle,base64_data:String)->Result<hosting::HostedMe
     if bytes.len()>10*1024*1024 || bytes.len()<64 || !bytes.starts_with(&[255,216,255]){
         return Err("Cloud uploads require a JPEG image under 10 MB".into());
     }
-    let auth=signed_cloud_call(app,json!({"action":"status"}))?;
-    let owner=auth["userId"].as_str().ok_or("Cloud session could not verify your account")?;
-    if Uuid::parse_str(owner).is_err(){return Err("Invalid cloud user".into())}
-    let dest=format!("{owner}/{}.jpg",Uuid::new_v4());
-    let dest_url=format!("{API_ROOT}/storage/v1/object/mm-public-media/{dest}");
-    let token=cloud_secret(app,ACCESS)?;
-    let make=|token:&str|{
-        ureq::post(&dest_url).timeout(std::time::Duration::from_secs(65))
-        .set("apikey",PUBLIC_KEY).set("Authorization",&format!("Bearer {token}"))
-        .set("Content-Type","image/jpeg").set("x-upsert","false").send_bytes(&bytes)
-    };
-    match make(&token){
-        Err(ureq::Error::Status(401,_))=>{parse_response(make(&refresh_session(app)?))?;},
-        other=>{parse_response(other)?;}
+    let prepared=signed_cloud_call(app,json!({"action":"prepare_media_upload"}))?;
+    let signed=prepared["uploadUrl"].as_str().ok_or("Cloud did not provide a signed upload URL")?;
+    let media=prepared["mediaUrl"].as_str().ok_or("Cloud did not provide a public media URL")?;
+    let signed_url=url::Url::parse(signed).map_err(|_|"Invalid signed upload URL")?;
+    let media_url=url::Url::parse(media).map_err(|_|"Invalid public media URL")?;
+    let trusted_host=Some("hwhioqvsxazyxziyrhdg.supabase.co");
+    if signed_url.scheme()!="https" || signed_url.host_str()!=trusted_host ||
+       !signed_url.path().starts_with("/storage/v1/object/upload/sign/mm-public-media/") ||
+       media_url.scheme()!="https" || media_url.host_str()!=trusted_host ||
+       !media_url.path().starts_with("/storage/v1/object/public/mm-public-media/") {
+        return Err("Cloud returned an untrusted media endpoint".into());
     }
-    let url=format!("{API_ROOT}/storage/v1/object/public/mm-public-media/{dest}");
-    Ok(hosting::HostedMedia {url,media_id:None,verified_public:true,
-      note:"JPEG uploaded to Supabase free storage. It is publicly accessible.".into()})
+    ureq::put(signed).timeout(std::time::Duration::from_secs(65))
+      .set("Content-Type","image/jpeg")
+      .set("x-upsert","false")
+      .send_bytes(&bytes)
+      .map_err(|_|"Cloud image upload failed. Retry once or select a smaller image.".to_string())?;
+    Ok(hosting::HostedMedia {url:media.to_string(),media_id:None,verified_public:true,
+      note:"JPEG uploaded to the free cloud media library.".into()})
 }
 pub fn logout(app:&AppHandle)->Result<(),String>{
     // Replace stored credentials with revoked markers; never expose tokens.

@@ -211,3 +211,7 @@ Meta Manager supports an optional, free, minute-level publishing worker in the e
 ## One-click Cloud Connect (v0.1.15)
 
 Cloud sign-in now uses a connected LinkedIn or Instagram profile. No Supabase email magic-link is needed. One click verifies the social account and grants publishing access for that selected account only. Other accounts stay local until enabled. Cloud sessions are random, hashed server-side, expire after 60 days, and can be revoked when signing out. Email sign-in is available as a hidden fallback.
+
+## Cloud media upload fix (v0.1.16)
+
+Cloud images now use a signed Supabase Storage upload URL issued only after the user has authenticated through Meta Manager Cloud. This makes uploads compatible with the one-click social session without distributing an admin key or requiring a separate Supabase JWT. Signed URLs are short-lived and are limited to one randomly generated object in the existing public media bucket. The desktop composer and MCP `upload_cloud_media` tool both use this flow.

@@ -142,6 +142,14 @@ Deno.serve(async(req:Request)=>{
   if(!user)return fail("Sign in to Meta Manager Cloud",401);
   const owner=user.id;
   if(body.action==="status")return response({authenticated:true,userId:owner});
+  if(body.action==="prepare_media_upload"){
+   const path=owner+"/"+crypto.randomUUID()+".jpg";
+   const {data,error}=await admin.storage.from("mm-public-media").createSignedUploadUrl(path);
+   if(error||!data?.signedUrl)return fail("Unable to reserve a cloud image upload",503);
+   return response({uploadUrl:data.signedUrl,
+    mediaUrl:url+"/storage/v1/object/public/mm-public-media/"+path});
+  }
+
   if(body.action==="sign_out"){
    const session=(req.headers.get("authorization")||"").replace(/^Bearer /,"");
    if(/^mmc_[0-9a-f]{64}$/.test(session)){
