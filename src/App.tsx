@@ -166,6 +166,7 @@ function App() {
   const [composerSchedule, setComposerSchedule] = useState("");
   const [composerHashtags, setComposerHashtags] = useState("");
   const [composerMediaUrl, setComposerMediaUrl] = useState("");
+  const [composerLinkUrl, setComposerLinkUrl] = useState("");
   const [publishingId, setPublishingId] = useState<string | null>(null);
   const [savingComposer, setSavingComposer] = useState(false);
   const [composerMessage, setComposerMessage] = useState("");
@@ -500,11 +501,16 @@ function App() {
   }
 
   async function handleSaveComposer(status: "draft" | "scheduled") {
-    const account = selectedAccount
-      ?? (composerPlatform === "linkedin"
-        ? localAccounts.find((item) => item.status === "linkedin_connected")
-        : localAccounts.find((item) => item.status === "connected"))
-      ?? null;
+    const selectedMatches = selectedAccount && (composerPlatform === "linkedin"
+      ? selectedAccount.status === "linkedin_connected"
+      : selectedAccount.status === "connected") ? selectedAccount : null;
+    if (selectedAccount && !selectedMatches) {
+      setComposerMessage("Selected workspace is not connected to " + (composerPlatform === "linkedin" ? "LinkedIn" : "Facebook/Instagram") + ". Switch accounts before scheduling.");
+      return;
+    }
+    const account = selectedMatches ?? (composerPlatform === "linkedin"
+      ? localAccounts.find((item) => item.status === "linkedin_connected")
+      : localAccounts.find((item) => item.status === "connected")) ?? null;
     if (!account) {
       setComposerMessage("Select a connected workspace first.");
       return;
@@ -516,6 +522,18 @@ function App() {
     if (status === "scheduled" && !composerSchedule) {
       setComposerMessage("Choose a date and time before scheduling.");
       return;
+    }
+    if (composerLinkUrl.trim() && !/^https?:\/\//i.test(composerLinkUrl.trim())) {
+      setComposerMessage("Links must start with https:// or http://."); return;
+    }
+    if ((composerPlatform === "instagram" || composerPlatform === "both") && !/^https:\/\//i.test(composerMediaUrl.trim())) {
+      setComposerMessage("Instagram needs a publicly accessible HTTPS image URL. Upload the image to your website or media host first."); return;
+    }
+    if (composerMediaUrl.trim() && !/^https:\/\//i.test(composerMediaUrl.trim())) {
+      setComposerMessage("Media URL must use public HTTPS."); return;
+    }
+    if (status === "scheduled" && new Date(composerSchedule).getTime() <= Date.now()) {
+      setComposerMessage("Schedule must be a future date and time."); return;
     }
     setSavingComposer(true);
     setComposerMessage("");
@@ -529,6 +547,7 @@ function App() {
         hashtags: composerHashtags.split(/[\s,]+/).map((tag) => tag.trim().replace(/^#/, "")).filter(Boolean),
         scheduledFor: status === "scheduled" && composerSchedule ? new Date(composerSchedule).toISOString() : null,
         mediaUrl: composerMediaUrl.trim() || null,
+        linkUrl: composerLinkUrl.trim() || null,
       });
       setCalendarItems((current) => [...current.filter((existing) => existing.id !== item.id), item]);
       setComposerMessage(status === "scheduled" ? "Post scheduled locally." : "Draft saved locally.");
@@ -537,6 +556,7 @@ function App() {
       setComposerSchedule("");
       setComposerHashtags("");
       setComposerMediaUrl("");
+      setComposerLinkUrl("");
       setTimeout(() => setShowComposer(false), 500);
     } catch (error) {
       setComposerMessage(String(error));
@@ -949,6 +969,7 @@ function App() {
             <div className="calendar-view-meta"><span className={`queue-status ${viewingCalendarItem.status}`}>{viewingCalendarItem.status}</span><i className="platform-text">{viewingCalendarItem.platform}</i><time>{viewingCalendarItem.scheduledFor ? new Date(viewingCalendarItem.scheduledFor).toLocaleString() : "Not scheduled"}</time></div>
             <div className="calendar-view-copy">{viewingCalendarItem.caption || "No caption yet."}</div>
             {viewingCalendarItem.hashtags.length ? <div className="calendar-view-tags">{viewingCalendarItem.hashtags.map((tag) => <span key={tag}>#{tag.replace(/^#/, "")}</span>)}</div> : null}
+            {viewingCalendarItem.linkUrl ? <p><a href={viewingCalendarItem.linkUrl} target="_blank" rel="noreferrer">{viewingCalendarItem.linkUrl}</a></p> : null}
             {viewingCalendarItem.mediaUrl ? <div className="calendar-view-media" style={{backgroundImage:`url(${viewingCalendarItem.mediaUrl})`}}/> : null}
             {viewingCalendarItem.lastError ? <div className="live-error">{viewingCalendarItem.lastError}</div> : null}
             <div className="composer-actions"><button className="secondary" onClick={() => setViewingCalendarItem(null)}>Close</button>{["draft","scheduled","failed"].includes(viewingCalendarItem.status) ? <button className="primary" disabled={publishingId === viewingCalendarItem.id} onClick={async () => { await handlePublishNow(viewingCalendarItem); setViewingCalendarItem(null); }}>{publishingId === viewingCalendarItem.id ? "Publishing…" : "Publish now"}</button> : null}</div>
@@ -965,8 +986,9 @@ function App() {
               <label><span>Platform</span><select value={composerPlatform} onChange={(event) => setComposerPlatform(event.target.value as "facebook" | "instagram" | "both" | "linkedin")}><option value="both">Facebook + Instagram</option><option value="facebook">Facebook</option><option value="instagram">Instagram</option><option value="linkedin">LinkedIn personal profile</option></select></label>
               <label className="composer-full"><span>Caption</span><textarea value={composerCaption} onChange={(event) => setComposerCaption(event.target.value)} placeholder="Write the post caption…" rows={8}/></label>
               <label className="composer-full"><span>Hashtags</span><input value={composerHashtags} onChange={(event) => setComposerHashtags(event.target.value)} placeholder="#webdevelopment #shopify #ecommerce" /></label>
-              <label className="composer-full"><span>Media URL <small>{composerPlatform === "linkedin" ? "LinkedIn text posts first — image upload comes next" : "Required for Instagram"}</small></span><input value={composerMediaUrl} onChange={(event) => setComposerMediaUrl(event.target.value)} disabled={composerPlatform === "linkedin"} placeholder={composerPlatform === "linkedin" ? "Not used for LinkedIn text posts" : "https://.../image.jpg"} /></label>
-              <label className="composer-full"><span>Schedule</span><input type="datetime-local" value={composerSchedule} onChange={(event) => setComposerSchedule(event.target.value)} /></label>
+              <label className="composer-full"><span>Image URL <small>{composerPlatform === "instagram" || composerPlatform === "both" ? "Public HTTPS image required. Local files cannot be published by Instagram until hosted online." : "Optional public HTTPS image"}</small></span><input value={composerMediaUrl} onChange={(event) => setComposerMediaUrl(event.target.value)} placeholder="https://your-site.com/image.jpg" /></label>
+              <label className="composer-full"><span>Link URL <small>LinkedIn article preview or clickable link in image post</small></span><input value={composerLinkUrl} onChange={(event) => setComposerLinkUrl(event.target.value)} placeholder="https://advertpreneur.com/your-article" /></label>
+              <label className="composer-full"><span>Schedule</span><input type="datetime-local" value={composerSchedule} onChange={(event) => setComposerSchedule(event.target.value)} /><small>Keep Meta Manager running at publishing time.</small></label>
             </div>
             {composerMessage ? <p className="setup-message">{composerMessage}</p> : null}
             <div className="composer-actions"><button className="secondary" disabled={savingComposer} onClick={() => handleSaveComposer("draft")}>Save draft</button><button className="primary" disabled={savingComposer} onClick={() => handleSaveComposer("scheduled")}>{savingComposer ? "Saving…" : "Schedule post"}</button></div>

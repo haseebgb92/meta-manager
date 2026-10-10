@@ -45,6 +45,13 @@ Meta Manager brings account connections, publishing, scheduling, media, analytic
 
 Windows and Linux use the same UI, SQLite schema, OAuth backend, and social API layer. Platform-specific handling is limited to local paths, bundled runtime behavior, certificate trust, and installer packaging.
 
+## Scheduling and media (v0.1.12)
+
+- LinkedIn personal posts now support hosted HTTPS images, article links, and scheduling through the MCP service.
+- Instagram Professional posting requires a publicly accessible HTTPS image URL; a local file alone is not accessible to Meta.
+- Instagram publishing waits for media processing to finish, and cross-platform retries retain successfully published destination IDs.
+- Scheduled jobs require the desktop application to remain running; cloud scheduling while the PC is off is not implemented.
+
 ## Simple account setup
 
 Provider developer credentials are **not entered on each computer**.

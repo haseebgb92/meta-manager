@@ -1621,26 +1621,36 @@ pub fn publish_calendar_item(app: &AppHandle, item_id: &str) -> Result<PublishRe
     crate::db::mark_calendar_publishing(app, item_id)?;
 
     let result = (|| -> Result<PublishResult, String> {
-        let mut facebook_post_id = None;
-        let mut instagram_post_id = None;
+        // Keep successful destination IDs so retrying a failed multi-platform post
+        // does not publish twice to a destination that already succeeded.
+        let parts: Vec<&str> = item.published_post_id.as_deref().unwrap_or("").split(';').collect();
+        let mut facebook_post_id = parts.iter().find_map(|v| v.strip_prefix("facebook:")).map(str::to_string);
+        let mut instagram_post_id = parts.iter().find_map(|v| v.strip_prefix("instagram:")).map(str::to_string);
 
         // Validate Instagram prerequisites before any platform is published.
         if wants_instagram && account.instagram_account_id.is_none() {
             return Err("This workspace has no linked Instagram professional account".into());
         }
 
-        if wants_facebook {
+        if wants_facebook && facebook_post_id.is_none() {
+            let image = item.media_url.as_deref().map(str::trim).filter(|s| !s.is_empty());
             let url = format!(
-                "https://graph.facebook.com/{}/{}/feed",
-                config.api_version, page_id.unwrap()
+                "https://graph.facebook.com/{}/{}/{}",
+                config.api_version, page_id.unwrap(), if image.is_some() {"photos"} else {"feed"}
             );
-            let response = graph_post_form(
-                &url,
-                &[
-                    ("message", caption.as_str()),
-                    ("access_token", page_token.as_deref().unwrap()),
-                ],
-            )?;
+            let mut pairs = vec![
+                ("access_token", page_token.as_deref().unwrap()),
+            ];
+            if let Some(image) = image {
+                pairs.push(("url", image));
+                pairs.push(("caption", caption.as_str()));
+            } else {
+                pairs.push(("message", caption.as_str()));
+                if let Some(link) = item.link_url.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                    pairs.push(("link", link));
+                }
+            }
+            let response = graph_post_form(&url, &pairs)?;
             facebook_post_id = response
                 .get("id")
                 .and_then(|v| v.as_str())
@@ -1648,9 +1658,10 @@ pub fn publish_calendar_item(app: &AppHandle, item_id: &str) -> Result<PublishRe
             if facebook_post_id.is_none() {
                 return Err(format!("Facebook did not return a post ID: {response}"));
             }
+            crate::db::mark_calendar_partial(app, item_id, &format!("facebook:{}", facebook_post_id.as_deref().unwrap()))?;
         }
 
-        if wants_instagram {
+        if wants_instagram && instagram_post_id.is_none() {
             let ig_id = account.instagram_account_id.as_deref().unwrap();
             let image_url = item.media_url.as_deref().unwrap().trim();
             let direct_secret = format!("instagram_direct_token_{ig_id}");
@@ -1682,6 +1693,32 @@ pub fn publish_calendar_item(app: &AppHandle, item_id: &str) -> Result<PublishRe
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| format!("Instagram did not return a creation ID: {created}"))?;
 
+            // Instagram media creation is asynchronous. Wait until the container is FINISHED.
+            let status_endpoint = if has_direct {
+                format!("https://graph.instagram.com/{creation_id}")
+            } else {
+                format!("https://graph.facebook.com/{}/{creation_id}", config.api_version)
+            };
+            let mut ready = false;
+            for _ in 0..20 {
+                let status_url = format!(
+                    "{status_endpoint}?fields=status_code,status&access_token={}",
+                    urlencoding::encode(&ig_token)
+                );
+                let current: serde_json::Value = ureq::get(&status_url)
+                    .timeout(std::time::Duration::from_secs(10))
+                    .call()
+                    .map_err(|e| format!("Instagram container status failed: {e}"))?
+                    .into_json()
+                    .map_err(|e| e.to_string())?;
+                let code = current["status_code"].as_str().unwrap_or("");
+                if code == "FINISHED" { ready = true; break; }
+                if code == "ERROR" || code == "EXPIRED" {
+                    return Err(format!("Instagram could not process the media: {}", current["status"].as_str().unwrap_or(code)));
+                }
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+            if !ready { return Err("Instagram media was not ready after 40 seconds. Check image URL and retry.".into()); }
             let published = graph_post_form(
                 &publish_url,
                 &[
@@ -1696,6 +1733,9 @@ pub fn publish_calendar_item(app: &AppHandle, item_id: &str) -> Result<PublishRe
             if instagram_post_id.is_none() {
                 return Err(format!("Instagram did not return a published media ID: {published}"));
             }
+            let partial = [facebook_post_id.as_ref().map(|v| format!("facebook:{v}")), instagram_post_id.as_ref().map(|v| format!("instagram:{v}"))]
+                .into_iter().flatten().collect::<Vec<_>>().join(";");
+            crate::db::mark_calendar_partial(app, item_id, &partial)?;
         }
 
         let stored_id = match (&facebook_post_id, &instagram_post_id) {

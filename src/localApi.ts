@@ -19,6 +19,7 @@ export type LocalCalendarItem = {
   caption: string | null;
   hashtags: string[];
   mediaUrl: string | null;
+  linkUrl: string | null;
   publishedPostId: string | null;
   scheduledFor: string | null;
   publishedAt: string | null;
@@ -34,7 +35,8 @@ export type LocalCalendarItemInput = {
   caption?: string | null;
   hashtags?: string[] | null;
   mediaUrl?: string | null;
-  scheduledFor?: string | null;
+  linkUrl?: string | null;
+  scheduledFor: string | null;
 };
 
 export type MetaConfigStatus = {

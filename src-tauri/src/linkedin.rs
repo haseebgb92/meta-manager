@@ -264,6 +264,48 @@ fn build_post_text(item: &db::CalendarItem) -> String {
     text
 }
 
+
+/// Upload a public image to the LinkedIn Images API before referencing it in a post.
+fn upload_image(token: &str, owner: &str, url: &str) -> Result<String, String> {
+    let parsed = url::Url::parse(url).map_err(|_| "Image URL is invalid")?;
+    if parsed.scheme() != "https" {
+        return Err("LinkedIn images need a public HTTPS image URL".into());
+    }
+    let response = ureq::get(url)
+        .timeout(std::time::Duration::from_secs(25))
+        .call()
+        .map_err(|e| format!("Could not download LinkedIn image: {e}"))?;
+    let content_type = response.header("content-type").unwrap_or("image/jpeg").split(';').next().unwrap_or("image/jpeg").to_owned();
+    if !["image/jpeg","image/png","image/gif"].contains(&content_type.as_str()) {
+        return Err(format!("LinkedIn supports JPEG, PNG or GIF; image source returned {content_type}"));
+    }
+    let mut bytes = Vec::new();
+    response.into_reader().take(12_000_001).read_to_end(&mut bytes)
+        .map_err(|e| format!("Image download failed: {e}"))?;
+    if bytes.is_empty() || bytes.len() > 12_000_000 {
+        return Err("LinkedIn image must be nonempty and at most 12 MB".into());
+    }
+    let setup: serde_json::Value = ureq::post("https://api.linkedin.com/rest/images?action=initializeUpload")
+        .timeout(std::time::Duration::from_secs(20))
+        .set("Authorization", &format!("Bearer {token}"))
+        .set("X-Restli-Protocol-Version", "2.0.0")
+        .set("LinkedIn-Version", "202606")
+        .set("Content-Type", "application/json")
+        .send_json(serde_json::json!({"initializeUploadRequest": {"owner": owner}}))
+        .map_err(|e| format!("LinkedIn image initialization failed: {e}"))?
+        .into_json().map_err(|e| e.to_string())?;
+    let upload_url = setup.pointer("/value/uploadUrl").and_then(|v| v.as_str())
+        .ok_or("LinkedIn did not return image upload URL")?;
+    let image_id = setup.pointer("/value/image").and_then(|v| v.as_str())
+        .ok_or("LinkedIn did not return image URN")?.to_string();
+    ureq::put(upload_url)
+        .timeout(std::time::Duration::from_secs(40))
+        .set("Authorization", &format!("Bearer {token}"))
+        .set("Content-Type", &content_type)
+        .send_bytes(&bytes)
+        .map_err(|e| format!("LinkedIn image upload failed: {e}"))?;
+    Ok(image_id)
+}
 pub fn publish_calendar_item(
     app: &AppHandle,
     item_id: &str,
@@ -292,35 +334,47 @@ pub fn publish_calendar_item(
         }
     }
 
-    let commentary = build_post_text(&item);
-    if commentary.trim().is_empty() {
-        return Err("LinkedIn posts need caption text".into());
+    let image_url = item.media_url.as_deref().map(str::trim).filter(|v| !v.is_empty());
+    let link_url = item.link_url.as_deref().map(str::trim).filter(|v| !v.is_empty());
+    if let Some(link) = link_url {
+        let u = url::Url::parse(link).map_err(|_| "LinkedIn link URL is invalid")?;
+        if !["https", "http"].contains(&u.scheme()) {
+            return Err("LinkedIn links must use HTTP or HTTPS".into());
+        }
     }
-    if item
-        .media_url
-        .as_deref()
-        .is_some_and(|value| !value.trim().is_empty())
-    {
-        return Err("LinkedIn image publishing is not enabled yet. Remove the Media URL for this text post.".into());
+    let mut commentary = build_post_text(&item);
+    if image_url.is_some() {
+        if let Some(link) = link_url {
+            if !commentary.contains(link) { commentary.push_str(&format!("\n\n{link}")); }
+        }
+    }
+    if commentary.trim().is_empty() && image_url.is_none() && link_url.is_none() {
+        return Err("LinkedIn posts need a caption, image, or link".into());
     }
 
     let token = meta::load_secret(app, &format!("linkedin_member_token_{}", account.member_id))?;
-    let body = serde_json::json!({
-        "author": format!("urn:li:person:{}", account.member_id),
-        "commentary": commentary,
-        "visibility": "PUBLIC",
-        "distribution": {
-            "feedDistribution": "MAIN_FEED",
-            "targetEntities": [],
-            "thirdPartyDistributionChannels": []
-        },
-        "lifecycleState": "PUBLISHED",
-        "isReshareDisabledByAuthor": false
-    });
-
+    let owner = format!("urn:li:person:{}", account.member_id);
     db::mark_calendar_publishing(app, item_id)?;
 
     let result = (|| -> Result<crate::meta::PublishResult, String> {
+        let mut body = serde_json::json!({
+            "author": owner,
+            "commentary": commentary,
+            "visibility": "PUBLIC",
+            "distribution": {
+                "feedDistribution": "MAIN_FEED",
+                "targetEntities": [],
+                "thirdPartyDistributionChannels": []
+            },
+            "lifecycleState": "PUBLISHED",
+            "isReshareDisabledByAuthor": false
+        });
+        if let Some(image_url) = image_url {
+            let image_id = upload_image(&token, &owner, image_url)?;
+            body["content"] = serde_json::json!({"media": {"id": image_id, "altText": item.title}});
+        } else if let Some(link) = link_url {
+            body["content"] = serde_json::json!({"article": {"source": link, "title": item.title, "description": ""}});
+        }
         let response = ureq::post("https://api.linkedin.com/rest/posts")
             .timeout(std::time::Duration::from_secs(20))
             .set("Authorization", &format!("Bearer {token}"))

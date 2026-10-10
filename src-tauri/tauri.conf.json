@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Meta Manager",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "identifier": "com.advertpreneur.metamanager",
   "build": {
     "frontendDist": "../dist",

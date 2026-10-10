@@ -36,6 +36,7 @@ pub struct CalendarItem {
     pub caption: Option<String>,
     pub hashtags: Vec<String>,
     pub media_url: Option<String>,
+    pub link_url: Option<String>,
     pub published_post_id: Option<String>,
     pub scheduled_for: Option<String>,
     pub published_at: Option<String>,
@@ -53,6 +54,7 @@ pub struct CalendarItemInput {
     pub caption: Option<String>,
     pub hashtags: Option<Vec<String>>,
     pub media_url: Option<String>,
+    pub link_url: Option<String>,
     pub scheduled_for: Option<String>,
 }
 
@@ -87,6 +89,7 @@ fn conn(app: &AppHandle) -> Result<Connection, String> {
                caption TEXT,
                hashtags TEXT NOT NULL DEFAULT '[]',
                media_url TEXT,
+               link_url TEXT,
                published_post_id TEXT,
                scheduled_for TEXT,
                published_at TEXT,
@@ -124,6 +127,7 @@ fn conn(app: &AppHandle) -> Result<Connection, String> {
         "caption TEXT",
         "hashtags TEXT NOT NULL DEFAULT '[]'",
         "media_url TEXT",
+        "link_url TEXT",
         "published_post_id TEXT",
         "published_at TEXT",
         "last_error TEXT",
@@ -288,10 +292,11 @@ fn calendar_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CalendarItem> 
         caption: row.get(5)?,
         hashtags,
         media_url: row.get(7)?,
-        published_post_id: row.get(8)?,
-        scheduled_for: row.get(9)?,
-        published_at: row.get(10)?,
-        last_error: row.get(11)?,
+        link_url: row.get(8)?,
+        published_post_id: row.get(9)?,
+        scheduled_for: row.get(10)?,
+        published_at: row.get(11)?,
+        last_error: row.get(12)?,
     })
 }
 
@@ -300,7 +305,7 @@ pub fn list_calendar(
     account_id: Option<String>,
 ) -> Result<Vec<CalendarItem>, String> {
     let connection = conn(app)?;
-    let base = "SELECT id,account_id,title,platform,status,caption,hashtags,media_url,
+    let base = "SELECT id,account_id,title,platform,status,caption,hashtags,media_url,link_url,
                        published_post_id,scheduled_for,published_at,last_error
                 FROM calendar_items";
     let sql = if account_id.is_some() {
@@ -350,6 +355,22 @@ pub fn save_calendar_item(
     };
 
     let status = input.status.unwrap_or_else(|| "draft".into());
+    if !matches!(status.as_str(), "draft" | "scheduled") { return Err("Post status must be draft or scheduled".into()); }
+    let account = get_account(app, account_id.to_string().as_str())?.ok_or("Workspace not found")?;
+    if platform == "linkedin" && account.status != "linkedin_connected" { return Err("Select a connected LinkedIn workspace".into()); }
+    if platform != "linkedin" && account.status == "linkedin_connected" { return Err("Select a Facebook/Instagram workspace".into()); }
+    if status == "scheduled" {
+        let time = input.scheduled_for.as_deref().ok_or("Scheduled posts need a date")?;
+        let when = chrono::DateTime::parse_from_rfc3339(time).map_err(|_| "Invalid scheduled date")?;
+        if when.with_timezone(&chrono::Utc) <= chrono::Utc::now() { return Err("Scheduled date must be in the future".into()); }
+        if matches!(platform.as_str(), "facebook"|"both") && account.facebook_page_id.is_none() { return Err("Facebook Page not connected".into()); }
+        if matches!(platform.as_str(), "instagram"|"both") {
+            if account.instagram_account_id.is_none() { return Err("Instagram account not connected".into()); }
+            let image = input.media_url.as_deref().unwrap_or("");
+            let valid = url::Url::parse(image).is_ok_and(|u| u.scheme() == "https");
+            if !valid { return Err("Instagram requires public HTTPS image media before scheduling".into()); }
+        }
+    }
     let hashtags =
         serde_json::to_string(&input.hashtags.unwrap_or_default()).map_err(|e| e.to_string())?;
     let id = input.id.unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -358,8 +379,8 @@ pub fn save_calendar_item(
     connection
         .execute(
             "INSERT INTO calendar_items (
-                id,account_id,title,platform,status,caption,hashtags,media_url,scheduled_for,updated_at
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,CURRENT_TIMESTAMP)
+                id,account_id,title,platform,status,caption,hashtags,media_url,link_url,scheduled_for,updated_at
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,CURRENT_TIMESTAMP)
              ON CONFLICT(id) DO UPDATE SET
                 account_id=excluded.account_id,
                 title=excluded.title,
@@ -368,6 +389,7 @@ pub fn save_calendar_item(
                 caption=excluded.caption,
                 hashtags=excluded.hashtags,
                 media_url=excluded.media_url,
+                link_url=excluded.link_url,
                 scheduled_for=excluded.scheduled_for,
                 updated_at=CURRENT_TIMESTAMP",
             params![
@@ -379,6 +401,7 @@ pub fn save_calendar_item(
                 input.caption,
                 hashtags,
                 input.media_url,
+                input.link_url,
                 input.scheduled_for
             ],
         )
@@ -392,7 +415,7 @@ pub fn get_calendar_item(app: &AppHandle, id: &str) -> Result<Option<CalendarIte
     let connection = conn(app)?;
     connection
         .query_row(
-            "SELECT id,account_id,title,platform,status,caption,hashtags,media_url,
+            "SELECT id,account_id,title,platform,status,caption,hashtags,media_url,link_url,
                     published_post_id,scheduled_for,published_at,last_error
              FROM calendar_items WHERE id=?1",
             [id],
@@ -400,6 +423,13 @@ pub fn get_calendar_item(app: &AppHandle, id: &str) -> Result<Option<CalendarIte
         )
         .optional()
         .map_err(|e| e.to_string())
+}
+
+pub fn mark_calendar_partial(app: &AppHandle, id: &str, published_post_id: &str) -> Result<(), String> {
+    let connection = conn(app)?;
+    connection.execute("UPDATE calendar_items SET published_post_id=?2, updated_at=CURRENT_TIMESTAMP WHERE id=?1",
+       params![id, published_post_id]).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 pub fn mark_calendar_published(
@@ -437,7 +467,7 @@ pub fn due_calendar_items(app: &AppHandle) -> Result<Vec<CalendarItem>, String> 
     let connection = conn(app)?;
     let mut stmt = connection
         .prepare(
-            "SELECT id,account_id,title,platform,status,caption,hashtags,media_url,
+            "SELECT id,account_id,title,platform,status,caption,hashtags,media_url,link_url,
                     published_post_id,scheduled_for,published_at,last_error
              FROM calendar_items
              WHERE status='scheduled'
