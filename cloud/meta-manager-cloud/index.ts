@@ -143,7 +143,9 @@ Deno.serve(async(req:Request)=>{
   const owner=user.id;
   if(body.action==="status")return response({authenticated:true,userId:owner});
   if(body.action==="prepare_media_upload"){
-   const path=owner+"/"+crypto.randomUUID()+".jpg";
+   const isVideo=body.mediaType==="video/mp4";
+   if(body.mediaType!=null&&!isVideo&&body.mediaType!=="image/jpeg")return fail("Unsupported media format");
+   const path=owner+"/"+crypto.randomUUID()+(isVideo?".mp4":".jpg");
    const {data,error}=await admin.storage.from("mm-public-media").createSignedUploadUrl(path);
    if(error||!data?.signedUrl)return fail("Unable to reserve a cloud image upload",503);
    return response({uploadUrl:data.signedUrl,
@@ -181,7 +183,7 @@ Deno.serve(async(req:Request)=>{
   }
   if(body.action==="list"){
    const {data,error}=await admin.from("mm_cloud_posts")
-    .select("id,source_id,account_id,provider,title,caption,hashtags,media_url,link_url,status,scheduled_for,attempts,last_error,published_remote_id,published_at")
+    .select("id,source_id,account_id,provider,content_type,title,caption,hashtags,media_url,link_url,status,scheduled_for,attempts,last_error,published_remote_id,published_at")
     .eq("owner_id",owner).order("created_at",{ascending:false}).limit(150);
    return error?fail("Cloud calendar unavailable",500):response({posts:data});
   }
@@ -206,6 +208,8 @@ Deno.serve(async(req:Request)=>{
     ||body.caption.length>4000||(body.mediaUrl!=null&&!isHttps(body.mediaUrl))
     ||(body.linkUrl!=null&&!isHttps(body.linkUrl))
     ||(body.provider==="instagram"&&!body.mediaUrl)
+    ||(body.contentType!=null&&!["feed","reel","story"].includes(body.contentType))
+    ||(body.provider!=="instagram"&&body.contentType!=null&&body.contentType!=="feed")
     ||(body.providerMode!=null&&!["standard","instagram_direct"].includes(body.providerMode))){
     return fail("Invalid scheduled post");
    }
@@ -227,7 +231,7 @@ Deno.serve(async(req:Request)=>{
     body.hashtags.filter((x:any)=>typeof x==="string").slice(0,25):[];
    const {data,error}=await admin.from("mm_cloud_posts").insert({
     owner_id:owner,source_id:body.sourceId,account_id:body.accountId,
-    provider:body.provider,provider_mode:body.providerMode||"standard",
+    provider:body.provider,provider_mode:body.providerMode||"standard",content_type:body.contentType||"feed",
     remote_account_id:body.remoteAccountId,title:body.title.trim(),
     caption:body.caption,hashtags,media_url:body.mediaUrl||null,link_url:body.linkUrl||null,
     scheduled_for:when.toISOString()

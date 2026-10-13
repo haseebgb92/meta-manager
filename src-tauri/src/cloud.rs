@@ -238,7 +238,8 @@ fn schedule_one(app:&AppHandle,item:&db::CalendarItem,provider:&str)->Result<(),
       "provider":provider,"providerMode":mode,"remoteAccountId":remote,
       "title":item.title,"caption":item.caption.clone().unwrap_or_default(),
       "hashtags":item.hashtags,"scheduledFor":item.scheduled_for,
-      "mediaUrl":item.media_url,"linkUrl":item.link_url
+      "mediaUrl":item.media_url,"linkUrl":item.link_url,
+      "contentType":match item.platform.as_str(){"instagram_reel"=>"reel","instagram_story"=>"story",_=>"feed"}
     }))?;
     Ok(())
 }
@@ -254,7 +255,7 @@ pub fn schedule_item(app:&AppHandle,item_id:String)->Result<(),String>{
     let networks:Vec<&str>=match item.platform.as_str(){
       "both"=>vec!["facebook","instagram"],
       "facebook"=>vec!["facebook"],
-      "instagram"=>vec!["instagram"],
+      "instagram"|"instagram_reel"|"instagram_story"=>vec!["instagram"],
       "linkedin"=>vec!["linkedin"],
       _=>return Err("Invalid platform".into())
     };
@@ -300,6 +301,20 @@ pub fn upload_media(app:&AppHandle,base64_data:String)->Result<hosting::HostedMe
       .map_err(|_|"Cloud image upload failed. Retry once or select a smaller image.".to_string())?;
     Ok(hosting::HostedMedia {url:media.to_string(),media_id:None,verified_public:true,
       note:"JPEG uploaded to the free cloud media library.".into()})
+}
+pub fn upload_video(app:&AppHandle,base64_data:String)->Result<hosting::HostedMedia,String>{
+ use base64::{engine::general_purpose::STANDARD,Engine as _};
+ if base64_data.len()>140_000_000{return Err("Video exceeds 100 MB limit".into());}
+ let bytes=STANDARD.decode(base64_data).map_err(|_|"Invalid video encoding")?;
+ if bytes.len()>100*1024*1024||bytes.len()<128||&bytes[4..8]!=b"ftyp"{return Err("Only MP4 videos under 100 MB are supported".into());}
+ let prepared=signed_cloud_call(app,json!({"action":"prepare_media_upload","mediaType":"video/mp4"}))?;
+ let signed=prepared["uploadUrl"].as_str().ok_or("No signed video upload URL")?;
+ let media=prepared["mediaUrl"].as_str().ok_or("No video media URL")?;
+ let u=url::Url::parse(signed).map_err(|_|"Invalid upload URL")?;
+ let v=url::Url::parse(media).map_err(|_|"Invalid media URL")?;
+ if u.scheme()!="https"||v.scheme()!="https"||u.host_str()!=Some("hwhioqvsxazyxziyrhdg.supabase.co")||v.host_str()!=u.host_str()||!u.path().starts_with("/storage/v1/object/upload/sign/mm-public-media/")||!v.path().starts_with("/storage/v1/object/public/mm-public-media/"){return Err("Untrusted cloud video endpoint".into());}
+ ureq::put(signed).timeout(std::time::Duration::from_secs(180)).set("Content-Type","video/mp4").set("x-upsert","false").send_bytes(&bytes).map_err(|_|"Cloud MP4 upload failed")?;
+ Ok(hosting::HostedMedia{url:media.into(),media_id:None,verified_public:true,note:"MP4 uploaded to cloud media hosting".into()})
 }
 pub fn logout(app:&AppHandle)->Result<(),String>{
     // Replace stored credentials with revoked markers; never expose tokens.

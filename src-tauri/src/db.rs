@@ -350,7 +350,7 @@ pub fn save_calendar_item(
     }
 
     let platform = match input.platform.as_str() {
-        "facebook" | "instagram" | "both" | "linkedin" => input.platform,
+        "facebook" | "instagram" | "instagram_reel" | "instagram_story" | "both" | "linkedin" => input.platform,
         _ => return Err("Platform must be facebook, instagram, both, or linkedin".into()),
     };
 
@@ -364,7 +364,7 @@ pub fn save_calendar_item(
         let when = chrono::DateTime::parse_from_rfc3339(time).map_err(|_| "Invalid scheduled date")?;
         if when.with_timezone(&chrono::Utc) <= chrono::Utc::now() { return Err("Scheduled date must be in the future".into()); }
         if matches!(platform.as_str(), "facebook"|"both") && account.facebook_page_id.is_none() { return Err("Facebook Page not connected".into()); }
-        if matches!(platform.as_str(), "instagram"|"both") {
+        if matches!(platform.as_str(), "instagram"|"instagram_reel"|"instagram_story"|"both") {
             if account.instagram_account_id.is_none() { return Err("Instagram account not connected".into()); }
             let image = input.media_url.as_deref().unwrap_or("");
             let valid = url::Url::parse(image).is_ok_and(|u| u.scheme() == "https");

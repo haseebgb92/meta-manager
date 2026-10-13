@@ -1,6 +1,6 @@
 type CloudPost = {
  id:string;owner_id:string;account_id:string;provider:string;provider_mode:string;
- remote_account_id:string;title:string;caption:string;hashtags:string[];media_url:string|null;link_url:string|null;
+ remote_account_id:string;content_type?:string;title:string;caption:string;hashtags:string[];media_url:string|null;link_url:string|null;
 };
 const sleep=(n:number)=>new Promise(ok=>setTimeout(ok,n));
 const id=(v:string)=>encodeURIComponent(v);
@@ -30,16 +30,18 @@ async function facebook(p:CloudPost,token:string){
  return String(remote);
 }
 async function instagram(p:CloudPost,token:string){
- if(!p.media_url)throw new Error("An Instagram image is required");
+ if(!p.media_url)throw new Error("Instagram media URL is required");
  const base=p.provider_mode==="instagram_direct"?"https://graph.instagram.com/":"https://graph.facebook.com/v23.0/";
  const acct=id(p.remote_account_id);
  const created=await request(base+acct+"/media",token,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},
-  body:new URLSearchParams({image_url:p.media_url,caption:text(p)})});
+  body:new URLSearchParams(p.content_type==="reel" ? {media_type:"REELS",video_url:p.media_url,caption:text(p)} :
+    p.content_type==="story" ? (/\.(mp4|mov)(?:\?|$)/i.test(p.media_url)?{media_type:"STORIES",video_url:p.media_url}:{media_type:"STORIES",image_url:p.media_url}) :
+    {image_url:p.media_url,caption:text(p)})});
  const container=created.data.id;
  if(!container)throw new Error("Instagram container could not be created");
  let ready=false;
- for(let i=0;i<10;i++){
-  await sleep(1600);
+ for(let i=0;i<40;i++){
+  await sleep(2000);
   const result=await request(base+id(container)+"?fields=status_code",token);
   if(result.data.status_code==="FINISHED"){ready=true;break}
   if(["EXPIRED","ERROR"].includes(result.data.status_code))throw new Error("Instagram media processing failed");

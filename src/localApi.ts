@@ -14,7 +14,7 @@ export type LocalCalendarItem = {
   id: string;
   accountId: string;
   title: string;
-  platform: "facebook" | "instagram" | "both" | "linkedin";
+  platform: "facebook" | "instagram" | "instagram_reel" | "instagram_story" | "both" | "linkedin";
   status: string;
   caption: string | null;
   hashtags: string[];
@@ -30,7 +30,7 @@ export type LocalCalendarItemInput = {
   id?: string | null;
   accountId: string;
   title: string;
-  platform: "facebook" | "instagram" | "both" | "linkedin";
+  platform: "facebook" | "instagram" | "instagram_reel" | "instagram_story" | "both" | "linkedin";
   status?: string | null;
   caption?: string | null;
   hashtags?: string[] | null;

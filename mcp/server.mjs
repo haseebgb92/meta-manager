@@ -231,13 +231,18 @@ async function publishLinkedin(item, account) {
 }
 async function publishInstagram(item, account) {
   if(!account.instagramAccountId) throw new Error("No Instagram account");
-  if(!httpsUrl(item.media_url)) throw new Error("Instagram requires a public HTTPS image URL");
+  if(!httpsUrl(item.media_url)) throw new Error("Instagram requires a public HTTPS media URL");
   const id=account.instagramAccountId;
   const direct=fs.existsSync(path.join(SECRET_DIR,"instagram_direct_token_"+id+".secret"));
   if(!direct&&!account.facebookPageId) throw new Error("Instagram needs a direct token or connected Facebook Page");
   const token=direct?readSecret("instagram_direct_token_"+id):readSecret("meta_page_token_"+account.facebookPageId);
   const base=direct?"https://graph.instagram.com":"https://graph.facebook.com/"+GRAPH_VERSION;
-  const created=await postForm(base+"/"+id+"/media",token,{image_url:item.media_url,caption:buildCaption(item)});
+  const kind=item.platform==="instagram_reel"?"reel":item.platform==="instagram_story"?"story":"feed";
+  if(kind==="reel" && !/\.mp4(?:\?|$)/i.test(item.media_url)) throw new Error("Instagram Reel requires public HTTPS MP4 video");
+  const params=kind==="reel"?{media_type:"REELS",video_url:item.media_url,caption:buildCaption(item)}:
+    kind==="story"?(/\.(mp4|mov)(?:\?|$)/i.test(item.media_url)?{media_type:"STORIES",video_url:item.media_url}:{media_type:"STORIES",image_url:item.media_url}):
+    {image_url:item.media_url,caption:buildCaption(item)};
+  const created=await postForm(base+"/"+id+"/media",token,params);
   if(!created.id) throw new Error("Instagram did not return a creation ID");
   let ready=false;
   for(let i=0;i<20;i++) {
@@ -259,12 +264,12 @@ async function publishItem(itemId) {
   if(!["draft","scheduled","failed"].includes(item.status)) throw new Error("Item not publishable: "+item.status);
   const account=getAccount(item.account_id);
   if(!account) throw new Error("Workspace not found");
-  const li=item.platform==="linkedin", fb=["facebook","both"].includes(item.platform), ig=["instagram","both"].includes(item.platform);
+  const li=item.platform==="linkedin", fb=["facebook","both"].includes(item.platform), ig=["instagram","instagram_reel","instagram_story","both"].includes(item.platform);
   if(!li&&!fb&&!ig) throw new Error("Invalid publishing platform");
   if(li&&account.status!=="linkedin_connected") throw new Error("Please select a LinkedIn workspace");
   if(fb&&!account.facebookPageId) throw new Error("Facebook Page not connected");
   if(ig&&!account.instagramAccountId) throw new Error("Instagram account not connected");
-  if(ig&&!httpsUrl(item.media_url)) throw new Error("Instagram requires a public HTTPS image URL");
+  if(ig&&!httpsUrl(item.media_url)) throw new Error("Instagram requires a public HTTPS media URL");
   const done=String(item.published_post_id||"").split(";");
   let lid=done.find(x=>x.startsWith("linkedin:"))?.slice(9)||null;
   let fid=done.find(x=>x.startsWith("facebook:"))?.slice(9)||null;
@@ -374,7 +379,7 @@ async function cloudCall(body){
 function cloudDestinations(item){
  const account=getAccount(item.account_id);
  if(!account)throw new Error("Selected local account not found");
- const destinations=item.platform==="both"?["facebook","instagram"]:[item.platform];
+ const destinations=item.platform==="both"?["facebook","instagram"]:[item.platform.startsWith("instagram_")?"instagram":item.platform];
  return destinations.map(provider=>{
   let remoteAccountId,providerMode="standard";
   if(provider==="facebook"){
@@ -408,7 +413,7 @@ async function enqueueCloudLocalItem(itemId){
     action:"schedule",accountId:item.account_id,sourceId:item.id,
     provider:p.provider,remoteAccountId:p.remoteAccountId,providerMode:p.providerMode,
     title:item.title,caption:item.caption||"",hashtags:JSON.parse(item.hashtags||"[]"),
-    mediaUrl:item.media_url,linkUrl:item.link_url,scheduledFor:item.scheduled_for
+    mediaUrl:item.media_url,linkUrl:item.link_url,scheduledFor:item.scheduled_for,contentType:item.platform==="instagram_reel"?"reel":item.platform==="instagram_story"?"story":"feed"
    });
    scheduled.push({provider:p.provider,id:result.post?.id});
   }
@@ -468,7 +473,7 @@ function getServer() {
   server.registerTool("create_cloud_post", {
     description:"Create and queue one cloud-scheduled social post. Works without the desktop running after queuing. Requires cloud login and connected publishing credentials.",
     inputSchema:{
-      account_id:z.string(),title:z.string().min(1),platform:z.enum(["facebook","instagram","both","linkedin"]),
+      account_id:z.string(),title:z.string().min(1),platform:z.enum(["facebook","instagram","instagram_reel","instagram_story","both","linkedin"]),
       caption:z.string().optional(),hashtags:z.array(z.string()).optional(),media_url:z.string().url().optional(),
       link_url:z.string().url().optional(),scheduled_for:z.string(),confirm:z.boolean()
     }
@@ -477,7 +482,7 @@ function getServer() {
     const account=getAccount(account_id);
     if(!account)throw new Error("Account not found");
     if(Date.parse(scheduled_for)<Date.now()+180000||!Number.isFinite(Date.parse(scheduled_for)))throw new Error("Schedule at least 3 minutes in the future");
-    if((platform==="instagram"||platform==="both")&&!/^https:\/\//.test(media_url||""))throw new Error("Instagram needs public HTTPS image");
+    if((["instagram","instagram_reel","instagram_story","both"].includes(platform))&&!/^https:\/\//.test(media_url||""))throw new Error("Instagram needs public HTTPS image");
     const uuid=crypto.randomUUID();
     run("INSERT INTO calendar_items(id,account_id,title,platform,status,caption,hashtags,media_url,link_url,scheduled_for,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
       [uuid,account_id,title,platform,"draft",caption,JSON.stringify(hashtags),media_url||null,link_url||null,new Date(scheduled_for).toISOString()]);
@@ -522,15 +527,15 @@ function getServer() {
     if(!confirm) throw new Error("Uploading media requires confirm=true");
     return textResult(await hostLocalImage(file_path));
   });
-  server.registerTool("create_post", { description: "Create a local Facebook, Instagram or LinkedIn draft or scheduled post with media URL and link URL. Instagram requires publicly hosted HTTPS image. Does not publish immediately.", inputSchema: { account_id:z.string(), title:z.string().min(1), platform:z.enum(["facebook","instagram","both","linkedin"]), caption:z.string().optional(), hashtags:z.array(z.string()).optional(), media_url:z.string().url().optional(), link_url:z.string().url().optional(), scheduled_for:z.string().optional() } }, async({account_id,title,platform,caption,hashtags=[],media_url,link_url,scheduled_for})=>{
+  server.registerTool("create_post", { description: "Create a local Facebook, Instagram or LinkedIn draft or scheduled post with media URL and link URL. Instagram requires publicly hosted HTTPS image. Does not publish immediately.", inputSchema: { account_id:z.string(), title:z.string().min(1), platform:z.enum(["facebook","instagram","instagram_reel","instagram_story","both","linkedin"]), caption:z.string().optional(), hashtags:z.array(z.string()).optional(), media_url:z.string().url().optional(), link_url:z.string().url().optional(), scheduled_for:z.string().optional() } }, async({account_id,title,platform,caption,hashtags=[],media_url,link_url,scheduled_for})=>{
     const account=getAccount(account_id);
     if(!account) throw new Error("Workspace not found");
     if(platform==="linkedin" && (account.status!=="linkedin_connected"||!rows("SELECT id FROM linkedin_accounts WHERE id=?",[account_id]).length)) throw new Error("Select a connected LinkedIn workspace");
     if(platform!=="linkedin" && account.status==="linkedin_connected") throw new Error("Select a Meta workspace");
     if(["facebook","both"].includes(platform)&&!account.facebookPageId) throw new Error("Workspace has no Facebook Page");
-    if(["instagram","both"].includes(platform)&&!account.instagramAccountId) throw new Error("Workspace has no Instagram account");
+    if(["instagram","instagram_reel","instagram_story","both"].includes(platform)&&!account.instagramAccountId) throw new Error("Workspace has no Instagram account");
     if(media_url&&!httpsUrl(media_url)) throw new Error("Image URL must be public HTTPS");
-    if(["instagram","both"].includes(platform)&&!media_url) throw new Error("Instagram requires public HTTPS image URL");
+    if(["instagram","instagram_reel","instagram_story","both"].includes(platform)&&!media_url) throw new Error("Instagram requires a public HTTPS media URL");
     if(link_url&&!/^https?:\/\//i.test(link_url)) throw new Error("Link URL must start with HTTP(S)");
     const date=scheduled_for?new Date(scheduled_for):null;
     if(date&&(!Number.isFinite(date.getTime())||date.getTime()<=Date.now())) throw new Error("Schedule must be a future date");

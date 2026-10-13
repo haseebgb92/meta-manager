@@ -214,6 +214,10 @@ async fn cloud_upload_media(app: tauri::AppHandle,base64_data:String)->Result<ho
  tauri::async_runtime::spawn_blocking(move ||cloud::upload_media(&app,base64_data)).await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
+async fn cloud_upload_video(app:tauri::AppHandle,base64_data:String)->Result<hosting::HostedMedia,String>{
+ tauri::async_runtime::spawn_blocking(move ||cloud::upload_video(&app,base64_data)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
 fn cloud_logout(app: tauri::AppHandle)->Result<(),String>{cloud::logout(&app)}
 
 #[tauri::command]
@@ -337,6 +341,7 @@ pub fn run() {
             cloud_schedule_item,
             cloud_list_posts,
             cloud_upload_media,
+            cloud_upload_video,
             cloud_logout,
             get_live_insights,
             get_mcp_status,

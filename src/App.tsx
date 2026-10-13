@@ -23,7 +23,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import {
   getCloudStatus, cloudSendCode, cloudVerifyCode, cloudConnectExisting, cloudConnectAccount,
-  cloudScheduleItem, cloudListPosts, cloudUploadMedia, cloudLogout, cloudDisconnectAccount,
+  cloudScheduleItem, cloudListPosts, cloudUploadMedia, cloudUploadVideo, cloudLogout, cloudDisconnectAccount,
   type CloudStatus, type CloudPost,
 } from "./cloudApi";
 
@@ -167,7 +167,7 @@ function App() {
   const [showComposer, setShowComposer] = useState(false);
   const [composerTitle, setComposerTitle] = useState("");
   const [composerCaption, setComposerCaption] = useState("");
-  const [composerPlatform, setComposerPlatform] = useState<"facebook" | "instagram" | "both" | "linkedin">("both");
+  const [composerPlatform, setComposerPlatform] = useState<"facebook" | "instagram" | "instagram_reel" | "instagram_story" | "both" | "linkedin">("both");
   const [composerSchedule, setComposerSchedule] = useState("");
   const [composerHashtags, setComposerHashtags] = useState("");
   const [composerMediaUrl, setComposerMediaUrl] = useState("");
@@ -718,6 +718,18 @@ function App() {
     }
   }
 
+  async function handleLocalVideo(file?:File){
+    if(!file||uploadingMedia)return;
+    if(!cloudStatus?.signedIn){setComposerMessage("Connect Cloud in Settings to upload MP4 videos.");return;}
+    if(file.type!=="video/mp4"||file.size>100*1024*1024){setComposerMessage("Choose an MP4 video under 100 MB.");return;}
+    setUploadingMedia(true);setComposerMessage("Uploading video to cloud media hosting…");
+    try{
+      const base64=await new Promise<string>((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result).split(",")[1]);r.onerror=()=>reject(new Error("Cannot read video"));r.readAsDataURL(file);});
+      const uploaded=await cloudUploadVideo(base64);
+      setComposerMediaUrl(uploaded.url);setComposerMessage(uploaded.note);
+    }catch(e){setComposerMessage(String(e));}finally{setUploadingMedia(false);}
+  }
+
   async function handleSaveComposer(status: "draft" | "scheduled") {
     const selectedMatches = selectedAccount && (composerPlatform === "linkedin"
       ? selectedAccount.status === "linkedin_connected"
@@ -744,8 +756,8 @@ function App() {
     if (composerLinkUrl.trim() && !/^https?:\/\//i.test(composerLinkUrl.trim())) {
       setComposerMessage("Links must start with https:// or http://."); return;
     }
-    if ((composerPlatform === "instagram" || composerPlatform === "both") && !/^https:\/\//i.test(composerMediaUrl.trim())) {
-      setComposerMessage("Instagram needs a publicly accessible HTTPS image URL. Upload the image to your website or media host first."); return;
+    if ((["instagram","instagram_reel","instagram_story","both"].includes(composerPlatform)) && !/^https:\/\//i.test(composerMediaUrl.trim())) {
+      setComposerMessage("Instagram needs a publicly accessible HTTPS media URL. Host your Reel video or Story image/video online first."); return;
     }
     if (composerMediaUrl.trim() && !/^https:\/\//i.test(composerMediaUrl.trim())) {
       setComposerMessage("Media URL must use public HTTPS."); return;
@@ -753,6 +765,7 @@ function App() {
     if (status === "scheduled" && new Date(composerSchedule).getTime() <= Date.now()) {
       setComposerMessage("Schedule must be a future date and time."); return;
     }
+    if (composerPlatform === "instagram_reel" && !/\.mp4(?:\?|$)/i.test(composerMediaUrl.trim())) {setComposerMessage("Reels require a public HTTPS .mp4 video URL.");return;}
     setSavingComposer(true);
     setComposerMessage("");
     try {
@@ -1259,15 +1272,16 @@ function App() {
             <div className="composer-head"><div><span className="eyebrow">CONTENT COMPOSER</span><h2>{selectedName === "All Accounts" ? "Create post" : `Create for ${selectedName}`}</h2></div><button onClick={() => setShowComposer(false)}>×</button></div>
             <div className="composer-grid">
               <label><span>Title</span><input value={composerTitle} onChange={(event) => setComposerTitle(event.target.value)} placeholder="Internal post title" /></label>
-              <label><span>Platform</span><select value={composerPlatform} onChange={(event) => setComposerPlatform(event.target.value as "facebook" | "instagram" | "both" | "linkedin")}><option value="both">Facebook + Instagram</option><option value="facebook">Facebook</option><option value="instagram">Instagram</option><option value="linkedin">LinkedIn personal profile</option></select></label>
+              <label><span>Platform</span><select value={composerPlatform} onChange={(event) => setComposerPlatform(event.target.value as "facebook" | "instagram" | "instagram_reel" | "instagram_story" | "both" | "linkedin")}><option value="both">Facebook + Instagram</option><option value="facebook">Facebook</option><option value="instagram">Instagram feed</option><option value="instagram_reel">Instagram Reel</option><option value="instagram_story">Instagram Story</option><option value="linkedin">LinkedIn personal profile</option></select></label>
               <label className="composer-full"><span>Caption</span><textarea value={composerCaption} onChange={(event) => setComposerCaption(event.target.value)} placeholder="Write the post caption…" rows={8}/></label>
               <label className="composer-full"><span>Hashtags</span><input value={composerHashtags} onChange={(event) => setComposerHashtags(event.target.value)} placeholder="#webdevelopment #shopify #ecommerce" /></label>
-              <label className="composer-full"><span>Image URL <small>{composerPlatform === "instagram" || composerPlatform === "both" ? "Public HTTPS image required. Local files cannot be published by Instagram until hosted online." : "Optional public HTTPS image"}</small></span><input value={composerMediaUrl} onChange={(event) => setComposerMediaUrl(event.target.value)} placeholder="https://your-site.com/image.jpg" /></label>
-              <label className="composer-full"><span>Upload Local Image</span><input type="file" accept="image/jpeg,image/png,image/webp" disabled={uploadingMedia} onChange={(event) => { void handleLocalImage(event.target.files?.[0]); event.target.value = ""; }} /><small>{uploadingMedia ? "Converting and uploading…" : cloudStatus?.signedIn ? "Uploads to Supabase free storage and automatically fills the public URL." : mediaHostStatus?.configured ? "Uploads to your WordPress media library." : "Connect Cloud or configure WordPress Media Hosting in Settings."}</small></label>
-              {composerMediaUrl.startsWith("https://") ? <div className="composer-full" style={{display:"flex",gap:12,alignItems:"center"}}><img src={composerMediaUrl} alt="Post image preview" style={{width:76,height:76,objectFit:"cover",borderRadius:12}} /><small>Hosted image</small></div> : null}
+              <label className="composer-full"><span>Media URL <small>{["instagram","instagram_reel","instagram_story","both"].includes(composerPlatform) ? "Public HTTPS media required. Reels need an accessible video URL; Stories accept an image or video URL." : "Optional public HTTPS image"}</small></span><input value={composerMediaUrl} onChange={(event) => setComposerMediaUrl(event.target.value)} placeholder="https://your-site.com/media.mp4" /></label>
+              {composerPlatform !== "instagram_reel" && <label className="composer-full"><span>Upload Local Image</span><input type="file" accept="image/jpeg,image/png,image/webp" disabled={uploadingMedia} onChange={(event) => { void handleLocalImage(event.target.files?.[0]); event.target.value = ""; }} /><small>{uploadingMedia ? "Converting and uploading…" : cloudStatus?.signedIn ? "Uploads to Supabase free storage and automatically fills the public URL." : mediaHostStatus?.configured ? "Uploads to your WordPress media library." : "Connect Cloud or configure WordPress Media Hosting in Settings."}</small></label>}
+              {["instagram_reel","instagram_story"].includes(composerPlatform) && <label className="composer-full"><span>Upload MP4 Video</span><input type="file" accept="video/mp4" disabled={uploadingMedia} onChange={e=>{void handleLocalVideo(e.target.files?.[0]);e.target.value="";}} /><small>Requires Cloud connection; MP4 up to 100 MB.</small></label>}
+              {composerMediaUrl.startsWith("https://") && !/\.(mp4|mov)(?:\?|$)/i.test(composerMediaUrl) ? <div className="composer-full" style={{display:"flex",gap:12,alignItems:"center"}}><img src={composerMediaUrl} alt="Post image preview" style={{width:76,height:76,objectFit:"cover",borderRadius:12}} /><small>Hosted image</small></div> : null}
               <label className="composer-full"><span>Link URL <small>LinkedIn article preview or clickable link in image post</small></span><input value={composerLinkUrl} onChange={(event) => setComposerLinkUrl(event.target.value)} placeholder="https://advertpreneur.com/your-article" /></label>
               {cloudStatus?.signedIn ? <label className="composer-full cloud-schedule-option"><span><input type="checkbox" checked={cloudMode} onChange={(e)=>setCloudMode(e.target.checked)} /> Publish using free Cloud Scheduler (works with computer off)</span><small>Enable the selected social account under Settings → Cloud Publishing first.</small></label> : null}
-              <label className="composer-full"><span>Schedule</span><input type="datetime-local" value={composerSchedule} onChange={(event) => setComposerSchedule(event.target.value)} /><small>{cloudStatus?.signedIn && cloudMode ? "Cloud worker checks posts each minute; no desktop required." : "Keep Meta Manager running for local scheduling."}</small></label>
+              <label className="composer-full"><span>Schedule</span><input type="datetime-local" value={composerSchedule} onChange={(event) => setComposerSchedule(event.target.value)} /><small>{cloudStatus?.signedIn && cloudMode ? "Cloud worker checks posts each minute; no desktop required." : "Keep Meta Manager running for local scheduling. Reels and Stories can use Cloud when configured."}</small></label>
             </div>
             {composerMessage ? <p className="setup-message">{composerMessage}</p> : null}
             <div className="composer-actions"><button className="secondary" disabled={savingComposer} onClick={() => handleSaveComposer("draft")}>Save draft</button><button className="primary" disabled={savingComposer || uploadingMedia} onClick={() => handleSaveComposer("scheduled")}>{savingComposer ? "Saving…" : "Schedule post"}</button></div>

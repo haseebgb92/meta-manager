@@ -18,4 +18,5 @@ export const cloudDisconnectAccount=(accountId:string,provider:"facebook"|"insta
 export const cloudScheduleItem=(itemId:string)=>invoke<void>("cloud_schedule_item",{itemId});
 export const cloudListPosts=()=>invoke<CloudPost[]>("cloud_list_posts");
 export const cloudUploadMedia=(base64Data:string)=>invoke<HostedMedia>("cloud_upload_media",{base64Data});
+export const cloudUploadVideo=(base64Data:string)=>invoke<HostedMedia>("cloud_upload_video",{base64Data});
 export const cloudLogout=()=>invoke<void>("cloud_logout");
