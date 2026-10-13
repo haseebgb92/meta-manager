@@ -24,6 +24,12 @@ pub struct CloudPost {
     #[serde(alias="account_id")]
     pub account_id: String,
     pub provider: String,
+    #[serde(default,alias="first_comment_status")]
+    pub first_comment_status: Option<String>,
+    #[serde(default,alias="first_comment_id")]
+    pub first_comment_id: Option<String>,
+    #[serde(default,alias="first_comment_error")]
+    pub first_comment_error: Option<String>,
     pub title: String,
     pub caption: String,
     pub hashtags: Vec<String>,

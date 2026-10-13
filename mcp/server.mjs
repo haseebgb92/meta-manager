@@ -186,6 +186,22 @@ function buildCaption(item) {
   return caption;
 }
 
+function captionWithLink(item){
+ const base=buildCaption(item),link=String(item.link_url||"").trim();
+ return link && item.platform!=="instagram_story" && !base.includes(link) ? [base,link].filter(Boolean).join("\n\n") : base;
+}
+async function publishFirstLinkComment(item,account,remote,provider){
+ const link=String(item.link_url||"").trim();
+ if(!link||item.platform==="instagram_story")return null;
+ if(!httpsUrl(link))throw new Error("First comment requires an HTTPS URL");
+ const direct=provider==="instagram"&&fs.existsSync(path.join(SECRET_DIR,"instagram_direct_token_"+account.instagramAccountId+".secret"));
+ const token=provider==="instagram"&&direct?readSecret("instagram_direct_token_"+account.instagramAccountId):readSecret("meta_page_token_"+account.facebookPageId);
+ const base=provider==="instagram"&&direct?"https://graph.instagram.com/":"https://graph.facebook.com/"+GRAPH_VERSION+"/";
+ const posted=await postForm(base+(base.endsWith("/")?"":"/")+encodeURIComponent(remote)+"/comments",token,{message:link});
+ if(!posted.id)throw new Error("First comment was not confirmed");
+ return posted.id;
+}
+
 const httpsUrl = value => { try { return new URL(value).protocol === "https:"; } catch { return false; } };
 async function postForm(url, token, data) {
   const r=await fetch(url,{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},
@@ -239,9 +255,9 @@ async function publishInstagram(item, account) {
   const base=direct?"https://graph.instagram.com":"https://graph.facebook.com/"+GRAPH_VERSION;
   const kind=item.platform==="instagram_reel"?"reel":item.platform==="instagram_story"?"story":"feed";
   if(kind==="reel" && !/\.mp4(?:\?|$)/i.test(item.media_url)) throw new Error("Instagram Reel requires public HTTPS MP4 video");
-  const params=kind==="reel"?{media_type:"REELS",video_url:item.media_url,caption:buildCaption(item)}:
+  const params=kind==="reel"?{media_type:"REELS",video_url:item.media_url,caption:captionWithLink(item)}:
     kind==="story"?(/\.(mp4|mov)(?:\?|$)/i.test(item.media_url)?{media_type:"STORIES",video_url:item.media_url}:{media_type:"STORIES",image_url:item.media_url}):
-    {image_url:item.media_url,caption:buildCaption(item)};
+    {image_url:item.media_url,caption:captionWithLink(item)};
   const created=await postForm(base+"/"+id+"/media",token,params);
   if(!created.id) throw new Error("Instagram did not return a creation ID");
   let ready=false;
@@ -283,15 +299,24 @@ async function publishItem(itemId) {
     if(fb&&!fid) {
       const token=readSecret("meta_page_token_"+account.facebookPageId);
       const image=(item.media_url||"").trim();
-      const fbpost=image?await graphPost(account.facebookPageId+"/photos",token,{url:image,caption:buildCaption(item)}):
-        await graphPost(account.facebookPageId+"/feed",token,{message:buildCaption(item),...(item.link_url?{link:item.link_url}:{})});
+      const fbpost=image?await graphPost(account.facebookPageId+"/photos",token,{url:image,caption:captionWithLink(item)}):
+        await graphPost(account.facebookPageId+"/feed",token,{message:captionWithLink(item),...(item.link_url?{link:item.link_url}:{})});
       fid=fbpost.post_id||fbpost.id;
       if(!fid) throw new Error("Facebook did not return a post ID");
       checkpoint();
     }
     if(ig&&!iid) {iid=await publishInstagram(item,account);checkpoint();}
     run("UPDATE calendar_items SET status='published',published_at=CURRENT_TIMESTAMP,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?",[itemId]);
-    return {itemId,linkedinPostId:lid,facebookPostId:fid,instagramPostId:iid,status:"published"};
+    const commentResults=[];
+    if(item.link_url&&item.platform!=="instagram_story"){
+      for(const [provider,remote] of [["facebook",fid],["instagram",iid]]){
+        if(!remote)continue;
+        try{const commentId=await publishFirstLinkComment(item,account,remote,provider);commentResults.push({provider,status:"published",commentId});}
+        catch(error){commentResults.push({provider,status:"failed",error:String(error).slice(0,200)});}
+      }
+      if(commentResults.some(x=>x.status==="failed"))run("UPDATE calendar_items SET last_error=? WHERE id=?",["Post published, but first comment failed: "+JSON.stringify(commentResults.filter(x=>x.status==="failed")),itemId]);
+    }
+    return {itemId,linkedinPostId:lid,facebookPostId:fid,instagramPostId:iid,status:"published",firstComments:commentResults};
   } catch(err) {
     run("UPDATE calendar_items SET status='failed',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",[String(err),itemId]);
     throw err;
@@ -450,6 +475,22 @@ async function uploadCloudFile(filePath){
  if(!response.ok)throw new Error("Cloud JPEG upload failed (HTTP "+response.status+")");
  return {mediaUrl:prepared.mediaUrl,note:"JPEG uploaded to free cloud storage",size:bytes.length};
 }
+async function uploadCloudVideo(filePath){
+ const base=fs.realpathSync(path.join(os.homedir(),"Downloads"));
+ const candidate=fs.realpathSync(filePath);
+ const rel=path.relative(base,candidate);
+ if(!rel||rel.startsWith("..")||path.isAbsolute(rel))throw new Error("Video must be in Downloads");
+ const stat=fs.statSync(candidate);
+ if(!stat.isFile()||stat.size<128||stat.size>100*1024*1024)throw new Error("MP4 must be under 100 MB");
+ const bytes=fs.readFileSync(candidate);
+ if(bytes.toString("ascii",4,8)!=="ftyp")throw new Error("Invalid MP4 file");
+ const prepared=await cloudCall({action:"prepare_media_upload",mediaType:"video/mp4"});
+ const signed=new URL(prepared.uploadUrl),publicUrl=new URL(prepared.mediaUrl);
+ if(signed.protocol!=="https:"||signed.hostname!=="hwhioqvsxazyxziyrhdg.supabase.co"||!signed.pathname.startsWith("/storage/v1/object/upload/sign/mm-public-media/")||publicUrl.protocol!=="https:"||publicUrl.hostname!==signed.hostname||!publicUrl.pathname.startsWith("/storage/v1/object/public/mm-public-media/"))throw new Error("Untrusted video upload endpoint");
+ const response=await fetch(prepared.uploadUrl,{method:"PUT",headers:{"Content-Type":"video/mp4","x-upsert":"false"},body:bytes,signal:AbortSignal.timeout(90000)});
+ if(!response.ok)throw new Error("Video upload failed HTTP "+response.status);
+ return {mediaUrl:prepared.mediaUrl,note:"MP4 uploaded",size:bytes.length};
+}
 function getServer() {
   const server = new McpServer({ name: "meta-manager", version: "0.1.16" });
   server.registerTool("cloud_status", {
@@ -496,6 +537,7 @@ function getServer() {
     return textResult(await uploadCloudFile(file_path));
   });
 
+  server.registerTool("upload_cloud_video",{description:"Upload an MP4 video in Downloads to cloud media hosting, confirm required",inputSchema:{file_path:z.string(),confirm:z.boolean()}},async({file_path,confirm})=>{if(!confirm)throw new Error("Confirmation required");return textResult(await uploadCloudVideo(file_path));});
   server.registerTool("list_accounts", { description: "List Meta Manager workspaces and linked Facebook/Instagram IDs without exposing tokens.", inputSchema: {} }, async()=>textResult(listAccounts()));
   server.registerTool("get_account_dashboard", { description: "Get live audience data and recent posts for one workspace or all connected workspaces.", inputSchema: { account_id: z.string().optional() } }, async({account_id})=>{
     const accounts = account_id ? [getAccount(account_id)].filter(Boolean) : listAccounts().filter((a)=>a.status==="connected");

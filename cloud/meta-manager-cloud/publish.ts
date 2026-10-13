@@ -11,6 +11,11 @@ async function request(url:string,token:string,init:RequestInit={}){
  if(!response.ok)throw new Error("Provider HTTP "+response.status+(data.error?.code?" ("+data.error.code+")":""));
  return {data,headers:response.headers};
 }
+function captionWithLink(p:CloudPost){
+ const base=text(p);
+ const link=(p.link_url||"").trim();
+ return link && p.content_type!=="story" && !base.includes(link) ? (base+"\n\n"+link).trim() : base;
+}
 function text(p:CloudPost){
  const tags=Array.isArray(p.hashtags)?p.hashtags.filter(x=>typeof x==="string").slice(0,25).map(x=>"#"+x.replace(/^#/,"").replace(/[^A-Za-z0-9_]/g,"")).filter(x=>x!=="#"):[];
  return [p.caption||"",tags.join(" ")].filter(Boolean).join("\n\n").slice(0,4000);
@@ -20,9 +25,9 @@ async function facebook(p:CloudPost,token:string){
  const form=new URLSearchParams();
  if(p.media_url){
   form.set("url",p.media_url);
-  form.set("caption",text(p)+(p.link_url?"\n"+p.link_url:""));
+  form.set("caption",captionWithLink(p));
  }else{
-  form.set("message",text(p));if(p.link_url)form.set("link",p.link_url);
+  form.set("message",captionWithLink(p));if(p.link_url)form.set("link",p.link_url);
  }
  const result=await request(base+(p.media_url?"/photos":"/feed"),token,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:form});
  const remote=result.data.post_id||result.data.id;
@@ -34,9 +39,9 @@ async function instagram(p:CloudPost,token:string){
  const base=p.provider_mode==="instagram_direct"?"https://graph.instagram.com/":"https://graph.facebook.com/v23.0/";
  const acct=id(p.remote_account_id);
  const created=await request(base+acct+"/media",token,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},
-  body:new URLSearchParams(p.content_type==="reel" ? {media_type:"REELS",video_url:p.media_url,caption:text(p)} :
+  body:new URLSearchParams(p.content_type==="reel" ? {media_type:"REELS",video_url:p.media_url,caption:captionWithLink(p)} :
     p.content_type==="story" ? (/\.(mp4|mov)(?:\?|$)/i.test(p.media_url)?{media_type:"STORIES",video_url:p.media_url}:{media_type:"STORIES",image_url:p.media_url}) :
-    {image_url:p.media_url,caption:text(p)})});
+    {image_url:p.media_url,caption:captionWithLink(p)})});
  const container=created.data.id;
  if(!container)throw new Error("Instagram container could not be created");
  let ready=false;
@@ -83,4 +88,14 @@ export async function publish(p:CloudPost,token:string){
  if(p.provider==="instagram")return instagram(p,token);
  if(p.provider==="linkedin")return linkedin(p,token);
  throw new Error("Unsupported network");
+}
+
+export async function firstLinkComment(p:CloudPost,token:string,remote:string):Promise<string|null>{
+ const link=(p.link_url||"").trim();
+ if(!link || p.content_type==="story" || !["facebook","instagram"].includes(p.provider))return null;
+ if(!/^https:\/\//i.test(link))throw new Error("First-comment link must use HTTPS");
+ const base=p.provider==="instagram" && p.provider_mode==="instagram_direct" ? "https://graph.instagram.com/" : "https://graph.facebook.com/v23.0/";
+ const result=await request(base+id(remote)+"/comments",token,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({message:link})});
+ if(!result.data.id)throw new Error("Provider did not confirm first comment");
+ return String(result.data.id);
 }

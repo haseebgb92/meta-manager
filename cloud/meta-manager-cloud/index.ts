@@ -1,5 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.57.0";
-import { publish } from "./publish.ts";
+import { publish, firstLinkComment } from "./publish.ts";
 
 const url=Deno.env.get("SUPABASE_URL")||"";
 const serviceKey=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
@@ -117,7 +117,13 @@ async function worker(req:Request){
     lease_until:null,last_error:null,updated_at:new Date().toISOString()
    }).eq("id",post.id).eq("status","publishing");
    if(saveError)throw new Error("Post published but recording the result failed; manual verification required");
-   results.push({id:post.id,status:"published"});
+   let commentStatus="not_requested",commentError:null|string=null,commentId:null|string=null;
+   if(post.link_url && post.content_type!=="story" && ["facebook","instagram"].includes(post.provider)){
+    try{commentId=await firstLinkComment(post,token,remote);commentStatus=commentId?"published":"not_requested";}
+    catch(e){commentStatus="failed";commentError=(e instanceof Error?e.message:String(e)).slice(0,220);}
+   }
+   await admin.from("mm_cloud_posts").update({first_comment_status:commentStatus,first_comment_id:commentId,first_comment_error:commentError}).eq("id",post.id);
+   results.push({id:post.id,status:"published",firstCommentStatus:commentStatus});
   }catch(e){
    // Publishing outcome may be ambiguous. Never retry automatically and double-post.
    await admin.from("mm_cloud_posts").update({
@@ -183,7 +189,7 @@ Deno.serve(async(req:Request)=>{
   }
   if(body.action==="list"){
    const {data,error}=await admin.from("mm_cloud_posts")
-    .select("id,source_id,account_id,provider,content_type,title,caption,hashtags,media_url,link_url,status,scheduled_for,attempts,last_error,published_remote_id,published_at")
+    .select("id,source_id,account_id,provider,content_type,title,caption,hashtags,media_url,link_url,status,scheduled_for,attempts,last_error,published_remote_id,published_at,first_comment_status,first_comment_id,first_comment_error")
     .eq("owner_id",owner).order("created_at",{ascending:false}).limit(150);
    return error?fail("Cloud calendar unavailable",500):response({posts:data});
   }

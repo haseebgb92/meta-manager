@@ -6,6 +6,7 @@ export type CloudPost = {
   status:string; scheduledFor:string; attempts:number; lastError:string|null;
   caption:string; hashtags:string[]; mediaUrl:string|null; linkUrl:string|null;
   publishedRemoteId:string|null; publishedAt:string|null;
+  firstCommentStatus?:string|null; firstCommentId?:string|null; firstCommentError?:string|null;
 };
 export const getCloudStatus=()=>invoke<CloudStatus>("get_cloud_status");
 export const cloudConnectExisting=()=>invoke<CloudStatus>("cloud_connect_existing");
