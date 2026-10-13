@@ -96,7 +96,9 @@ export async function firstLinkComment(p:CloudPost,token:string,remote:string):P
  if(!/^https:\/\//i.test(link))throw new Error("First-comment link must use HTTPS");
  if(p.provider==="linkedin"){
   if(!/^urn:li:(share|ugcPost):[A-Za-z0-9_-]+$/.test(remote))throw new Error("LinkedIn returned an unsupported post URN");
-  const result=await request("https://api.linkedin.com/rest/socialActions/"+encodeURIComponent(remote)+"/comments",token,{method:"POST",headers:{"Content-Type":"application/json","Linkedin-Version":"202608","X-Restli-Protocol-Version":"2.0.0"},body:JSON.stringify({actor:"urn:li:person:"+p.remote_account_id,object:remote,message:{text:link}})});
+  let result;
+  try{result=await request("https://api.linkedin.com/rest/socialActions/"+encodeURIComponent(remote)+"/comments",token,{method:"POST",headers:{"Content-Type":"application/json","Linkedin-Version":"202608","X-Restli-Protocol-Version":"2.0.0"},body:JSON.stringify({actor:"urn:li:person:"+p.remote_account_id,object:remote,message:{text:link}})});}
+  catch(e){if(String(e).includes("HTTP 403"))throw new Error("LinkedIn Community Management API access not approved. Existing post published; first comment not added.");throw e;}
   const commentId=result.headers.get("x-restli-id")||result.data.id;
   if(!commentId)throw new Error("LinkedIn comment not confirmed");
   return String(commentId);

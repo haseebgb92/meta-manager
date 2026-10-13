@@ -200,7 +200,7 @@ async function publishFirstLinkComment(item,account,remote,provider){
   if(!member)throw new Error("LinkedIn member unavailable");
   const token=readSecret("linkedin_member_token_"+member.member_id);
   const response=await fetch("https://api.linkedin.com/rest/socialActions/"+encodeURIComponent(remote)+"/comments",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json","Linkedin-Version":"202608","X-Restli-Protocol-Version":"2.0.0"},body:JSON.stringify({actor:"urn:li:person:"+member.member_id,object:remote,message:{text:link}}),signal:AbortSignal.timeout(25000)});
-  if(!response.ok)throw new Error("LinkedIn comment HTTP "+response.status);
+  if(!response.ok)throw new Error(response.status===403?"LinkedIn Community Management API permission not approved; post published but comment not added":"LinkedIn comment HTTP "+response.status);
   const commentId=response.headers.get("x-restli-id")|| (await response.json().catch(()=>({}))).id;
   if(!commentId)throw new Error("LinkedIn comment not confirmed");
   return commentId;
