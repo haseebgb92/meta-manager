@@ -194,6 +194,17 @@ async function publishFirstLinkComment(item,account,remote,provider){
  const link=String(item.link_url||"").trim();
  if(!link||item.platform==="instagram_story")return null;
  if(!httpsUrl(link))throw new Error("First comment requires an HTTPS URL");
+ if(provider==="linkedin"){
+  if(!/^urn:li:(share|ugcPost):[A-Za-z0-9_-]+$/.test(remote))throw new Error("Unsupported LinkedIn post URN");
+  const member=rows("SELECT member_id FROM linkedin_accounts WHERE id=?",[account.id])[0];
+  if(!member)throw new Error("LinkedIn member unavailable");
+  const token=readSecret("linkedin_member_token_"+member.member_id);
+  const response=await fetch("https://api.linkedin.com/rest/socialActions/"+encodeURIComponent(remote)+"/comments",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json","Linkedin-Version":"202608","X-Restli-Protocol-Version":"2.0.0"},body:JSON.stringify({actor:"urn:li:person:"+member.member_id,object:remote,message:{text:link}}),signal:AbortSignal.timeout(25000)});
+  if(!response.ok)throw new Error("LinkedIn comment HTTP "+response.status);
+  const commentId=response.headers.get("x-restli-id")|| (await response.json().catch(()=>({}))).id;
+  if(!commentId)throw new Error("LinkedIn comment not confirmed");
+  return commentId;
+ }
  const direct=provider==="instagram"&&fs.existsSync(path.join(SECRET_DIR,"instagram_direct_token_"+account.instagramAccountId+".secret"));
  const token=provider==="instagram"&&direct?readSecret("instagram_direct_token_"+account.instagramAccountId):readSecret("meta_page_token_"+account.facebookPageId);
  const base=provider==="instagram"&&direct?"https://graph.instagram.com/":"https://graph.facebook.com/"+GRAPH_VERSION+"/";
@@ -309,7 +320,7 @@ async function publishItem(itemId) {
     run("UPDATE calendar_items SET status='published',published_at=CURRENT_TIMESTAMP,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?",[itemId]);
     const commentResults=[];
     if(item.link_url&&item.platform!=="instagram_story"){
-      for(const [provider,remote] of [["facebook",fid],["instagram",iid]]){
+      for(const [provider,remote] of [["facebook",fid],["instagram",iid],["linkedin",lid]]){
         if(!remote)continue;
         try{const commentId=await publishFirstLinkComment(item,account,remote,provider);commentResults.push({provider,status:"published",commentId});}
         catch(error){commentResults.push({provider,status:"failed",error:String(error).slice(0,200)});}

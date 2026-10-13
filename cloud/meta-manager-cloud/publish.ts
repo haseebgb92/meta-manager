@@ -92,8 +92,15 @@ export async function publish(p:CloudPost,token:string){
 
 export async function firstLinkComment(p:CloudPost,token:string,remote:string):Promise<string|null>{
  const link=(p.link_url||"").trim();
- if(!link || p.content_type==="story" || !["facebook","instagram"].includes(p.provider))return null;
+ if(!link || p.content_type==="story" || !["facebook","instagram","linkedin"].includes(p.provider))return null;
  if(!/^https:\/\//i.test(link))throw new Error("First-comment link must use HTTPS");
+ if(p.provider==="linkedin"){
+  if(!/^urn:li:(share|ugcPost):[A-Za-z0-9_-]+$/.test(remote))throw new Error("LinkedIn returned an unsupported post URN");
+  const result=await request("https://api.linkedin.com/rest/socialActions/"+encodeURIComponent(remote)+"/comments",token,{method:"POST",headers:{"Content-Type":"application/json","Linkedin-Version":"202608","X-Restli-Protocol-Version":"2.0.0"},body:JSON.stringify({actor:"urn:li:person:"+p.remote_account_id,object:remote,message:{text:link}})});
+  const commentId=result.headers.get("x-restli-id")||result.data.id;
+  if(!commentId)throw new Error("LinkedIn comment not confirmed");
+  return String(commentId);
+ }
  const base=p.provider==="instagram" && p.provider_mode==="instagram_direct" ? "https://graph.instagram.com/" : "https://graph.facebook.com/v23.0/";
  const result=await request(base+id(remote)+"/comments",token,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({message:link})});
  if(!result.data.id)throw new Error("Provider did not confirm first comment");

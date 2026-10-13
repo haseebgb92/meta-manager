@@ -118,7 +118,7 @@ async function worker(req:Request){
    }).eq("id",post.id).eq("status","publishing");
    if(saveError)throw new Error("Post published but recording the result failed; manual verification required");
    let commentStatus="not_requested",commentError:null|string=null,commentId:null|string=null;
-   if(post.link_url && post.content_type!=="story" && ["facebook","instagram"].includes(post.provider)){
+   if(post.link_url && post.content_type!=="story" && ["facebook","instagram","linkedin"].includes(post.provider)){
     try{commentId=await firstLinkComment(post,token,remote);commentStatus=commentId?"published":"not_requested";}
     catch(e){commentStatus="failed";commentError=(e instanceof Error?e.message:String(e)).slice(0,220);}
    }
