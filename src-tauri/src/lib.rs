@@ -73,9 +73,15 @@ fn spawn_mcp_service(app: &tauri::AppHandle) -> Result<Option<Child>, String> {
     let log_file = std::fs::File::create(mcp_log_path(app)?)
         .map_err(|e| format!("Cannot create MCP diagnostic log: {e}"))?;
     let err_file = log_file.try_clone().map_err(|e| e.to_string())?;
+    let script_folder = script.parent().ok_or_else(|| "MCP script folder is missing".to_string())?;
+    let script_name = script.file_name().ok_or_else(|| "MCP script filename is missing".to_string())?;
+    // On Windows, use a relative script argument with a known working directory.
+    // Passing the absolute resource path caused node.exe to interpret only the drive
+    // component ("D:") on some NSIS installations.
     Command::new(node_program)
+        .current_dir(script_folder)
         .arg("--no-warnings")
-        .arg(script)
+        .arg(script_name)
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(err_file))
         .spawn()

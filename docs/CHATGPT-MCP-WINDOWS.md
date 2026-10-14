@@ -29,3 +29,6 @@ MCP Bridge v0.2.11+ reads this local file alongside its own categorized tunnel f
 ## Windows MCP startup unblock (v0.1.26)
 
 Windows GitHub CI reproduced a launched desktop app with no running MCP listener or MCP startup log. The previous initialization sequence invoked Windows localhost-certificate import synchronously **before** launching MCP. v0.1.26 removes certificate operations from desktop startup: the MCP listener initializes independently; trust configuration is attempted only when starting Facebook or Instagram authorization, and any Windows certificate-import process has a bounded timeout. Windows CI verifies this by launching the packaged desktop executable and querying `/health`, not just running the standalone Node script.
+## Windows Node argument-path correction (v0.1.27)
+
+A stronger NSIS extracted-desktop integration test found that Windows Node startup failed with `EISDIR: lstat 'D:'` when the desktop app invoked a bundled MCP script via its absolute resource path. The service launcher now sets its working directory to the script resource directory and passes only the script filename as the Node argument. The Windows workflow requires the extracted desktop app to respond successfully at `http://127.0.0.1:38939/health` before publishing a release.
