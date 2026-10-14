@@ -39,9 +39,48 @@ jobs:
       - name: Build NSIS installer
         run: npm run tauri -- build --bundles nsis
 
+      - name: Smoke-test Windows MCP runtime
+        shell: pwsh
+        run: |
+          $node = (Resolve-Path "src-tauri/resources/windows/node.exe").Path
+          $script = (Resolve-Path "src-tauri/resources/meta-manager-mcp.cjs").Path
+          & $node --version
+          $child = Start-Process -FilePath $node -ArgumentList @("--no-warnings", "`"$script`"") -PassThru -WindowStyle Hidden
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 40; $i++) {
+              Start-Sleep -Milliseconds 250
+              try {
+                $result = Invoke-RestMethod -Uri "http://127.0.0.1:38939/health" -TimeoutSec 2
+                if ($result.ok -eq $true) { $ready = $true; break }
+              } catch {}
+              if ($child.HasExited) { break }
+            }
+            if (-not $ready) { throw "Bundled Meta Manager MCP service failed Windows health smoke test" }
+            Write-Host "Bundled Windows MCP service health OK"
+          } finally {
+            if (-not $child.HasExited) { Stop-Process -Id $child.Id -Force }
+          }
+
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
           name: Meta-Manager-Windows-x64
           path: src-tauri/target/release/bundle/nsis/*-setup.exe
           if-no-files-found: error
+  release:
+    name: Publish Windows release
+    needs: windows
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Meta-Manager-Windows-x64
+          path: release-assets
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release-assets/*-setup.exe

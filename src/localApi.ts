@@ -211,7 +211,7 @@ export async function uploadHostedMedia(base64Data: string, filename: string): P
   return invoke<HostedMedia>("upload_hosted_media", { base64Data, filename });
 }
 
-export type McpStatus = { online: boolean; endpoint: string };
+export type McpStatus = { online: boolean; endpoint: string; diagnostic?: string };
 export async function getMcpStatus(): Promise<McpStatus | null> {
   if (!isDesktop()) return null;
   return invoke<McpStatus>("get_mcp_status");

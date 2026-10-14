@@ -57,6 +57,7 @@ pub fn save_config(app: &AppHandle, app_id: String, secret: Option<String>) -> R
 
 pub fn prepare_oauth(app: &AppHandle) -> Result<InstagramOAuthPlan, String> {
     let app_id = APP_ID.to_string();
+    meta::ensure_local_tls_material(app)?;
 
     let state = Uuid::new_v4().to_string();
     db::set_setting(app, "instagram_oauth_state", &state)?;
@@ -142,7 +143,7 @@ fn complete_oauth(app: &AppHandle, code: Option<String>, state: Option<String>) 
             "code": code,
             "redirectUri": REDIRECT_URI
         }))
-        .map_err(|e| format!("Instagram token exchange failed: {e}"))?
+        .map_err(|e| crate::oauth::broker_failure("Instagram", e))?
         .into_json().map_err(|e| format!("Instagram broker returned an invalid token response: {e}"))?;
     let access_token = long.get("access_token").and_then(|v| v.as_str()).ok_or_else(|| format!("Instagram broker response missing access token: {long}"))?.to_string();
     let expires_in = long.get("expires_in").and_then(|v| v.as_i64()).unwrap_or(0);

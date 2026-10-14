@@ -331,7 +331,7 @@ pub(crate) fn ensure_local_tls_material(app: &AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     {
         // Chrome/Edge use the Windows certificate store. CurrentUser avoids an admin requirement.
-        let _ = Command::new("certutil")
+        let status = Command::new("certutil")
             .args([
                 "-user",
                 "-addstore",
@@ -339,7 +339,13 @@ pub(crate) fn ensure_local_tls_material(app: &AppHandle) -> Result<(), String> {
                 "Root",
                 ca_crt.to_str().unwrap_or_default(),
             ])
-            .status();
+            .status()
+            .map_err(|e| format!("Windows local OAuth certificate trust could not be configured: {e}"))?;
+        if !status.success() {
+            return Err(format!(
+                "Windows could not trust the Meta Manager localhost certificate (certutil exit: {status}).                  Check Windows certificate policies before connecting Facebook or Instagram."
+            ));
+        }
     }
 
     #[cfg(not(windows))]
@@ -560,7 +566,7 @@ fn complete_oauth(
             "code": code,
             "redirectUri": config.redirect_uri
         }))
-        .map_err(|e| format!("Meta token exchange failed: {e}"))?
+        .map_err(|e| crate::oauth::broker_failure("Facebook", e))?
         .into_json()
         .map_err(|e| format!("Meta broker returned an invalid token response: {e}"))?;
 

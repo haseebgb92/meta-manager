@@ -27,34 +27,46 @@ impl Drop for McpProcess {
     }
 }
 
-fn spawn_mcp_service(app: &tauri::AppHandle) -> Option<Child> {
+fn mcp_log_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("meta-manager-mcp.log"))
+}
+
+fn spawn_mcp_service(app: &tauri::AppHandle) -> Result<Option<Child>, String> {
     if TcpStream::connect("127.0.0.1:38939").is_ok() {
-        return None;
+        return Ok(None);
     }
     let script = if cfg!(debug_assertions) {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("resources")
-            .join("meta-manager-mcp.cjs")
+            .join("resources").join("meta-manager-mcp.cjs")
     } else {
-        app.path()
-            .resolve("resources/meta-manager-mcp.cjs", BaseDirectory::Resource)
-            .ok()?
+        app.path().resolve("resources/meta-manager-mcp.cjs", BaseDirectory::Resource)
+            .map_err(|e| format!("Cannot locate bundled MCP script: {e}"))?
     };
     let node_program = if cfg!(target_os = "windows") && !cfg!(debug_assertions) {
-        app.path()
-            .resolve("resources/windows/node.exe", BaseDirectory::Resource)
-            .ok()?
+        app.path().resolve("resources/windows/node.exe", BaseDirectory::Resource)
+            .map_err(|e| format!("Cannot locate bundled Node runtime: {e}"))?
     } else {
         std::path::PathBuf::from("node")
     };
-
+    if !script.exists() {
+        return Err(format!("MCP script missing from installation: {}", script.display()));
+    }
+    if cfg!(target_os = "windows") && !cfg!(debug_assertions) && !node_program.exists() {
+        return Err(format!("Bundled Node runtime missing: {}", node_program.display()));
+    }
+    let log_file = std::fs::File::create(mcp_log_path(app)?)
+        .map_err(|e| format!("Cannot create MCP diagnostic log: {e}"))?;
+    let err_file = log_file.try_clone().map_err(|e| e.to_string())?;
     Command::new(node_program)
         .arg("--no-warnings")
         .arg(script)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::from(log_file))
+        .stderr(Stdio::from(err_file))
         .spawn()
-        .ok()
+        .map(Some)
+        .map_err(|e| format!("Cannot start Meta Manager MCP service: {e}"))
 }
 
 #[tauri::command]
@@ -271,13 +283,26 @@ async fn get_live_insights(
 struct McpStatus {
     online: bool,
     endpoint: String,
+    diagnostic: String,
 }
 
 #[tauri::command]
-fn get_mcp_status() -> McpStatus {
+fn get_mcp_status(app: tauri::AppHandle) -> McpStatus {
+    let online = TcpStream::connect("127.0.0.1:38939").is_ok();
+    let diagnostic = if online {
+        "Local MCP listener is responding on port 38939".into()
+    } else {
+        mcp_log_path(&app)
+            .ok()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|content| content.lines().rev().find(|line| !line.trim().is_empty()).map(str::to_owned))
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "MCP service is offline. Check the installed Node runtime and local firewall.".into())
+    };
     McpStatus {
-        online: TcpStream::connect("127.0.0.1:38939").is_ok(),
+        online,
         endpoint: "http://127.0.0.1:38939/mcp".into(),
+        diagnostic: diagnostic.chars().take(500).collect(),
     }
 }
 
@@ -305,7 +330,15 @@ pub fn run() {
             db::init(app.handle()).map_err(std::io::Error::other)?;
             let _ = meta::ensure_local_tls_material(app.handle());
             meta::start_scheduler(app.handle().clone());
-            let mcp_child = spawn_mcp_service(app.handle());
+            let mcp_child = match spawn_mcp_service(app.handle()) {
+                Ok(child) => child,
+                Err(error) => {
+                    if let Ok(path) = mcp_log_path(app.handle()) {
+                        let _ = std::fs::write(path, format!("{error}\n"));
+                    }
+                    None
+                }
+            };
             app.manage(McpProcess(Mutex::new(mcp_child)));
             Ok(())
         })

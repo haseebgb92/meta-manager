@@ -203,7 +203,7 @@ fn complete_oauth(
             "code": code,
             "redirectUri": PERSONAL_REDIRECT_URI
         }))
-        .map_err(|e| format!("LinkedIn token exchange failed: {e}"))?
+        .map_err(|e| crate::oauth::broker_failure("LinkedIn", e))?
         .into_json()
         .map_err(|_| "LinkedIn broker returned an invalid token response".to_string())?;
 
