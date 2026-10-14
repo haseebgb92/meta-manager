@@ -389,7 +389,9 @@ pub fn run() {
                 )?;
             }
             db::init(app.handle()).map_err(std::io::Error::other)?;
-            let _ = meta::ensure_local_tls_material(app.handle());
+            // OAuth certificate setup may invoke Windows certificate-store UI. It is
+            // intentionally performed only when an OAuth login is requested, never
+            // on application startup: MCP must start without waiting for it.
             meta::start_scheduler(app.handle().clone());
             let mcp_child = match spawn_mcp_service(app.handle()) {
                 Ok(child) => child,

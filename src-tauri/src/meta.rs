@@ -331,19 +331,30 @@ pub(crate) fn ensure_local_tls_material(app: &AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     {
         // Chrome/Edge use the Windows certificate store. CurrentUser avoids an admin requirement.
-        let status = Command::new("certutil")
-            .args([
-                "-user",
-                "-addstore",
-                "-f",
-                "Root",
-                ca_crt.to_str().unwrap_or_default(),
-            ])
-            .status()
+        let mut cert_process = Command::new("certutil")
+            .args(["-user", "-addstore", "-f", "Root", ca_crt.to_str().unwrap_or_default()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
             .map_err(|e| format!("Windows local OAuth certificate trust could not be configured: {e}"))?;
+        let started = std::time::Instant::now();
+        let status = loop {
+            match cert_process.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) if started.elapsed() < std::time::Duration::from_secs(15) => {
+                    std::thread::sleep(std::time::Duration::from_millis(120));
+                }
+                Ok(None) => {
+                    let _ = cert_process.kill();
+                    let _ = cert_process.wait();
+                    return Err("Windows localhost certificate approval timed out. Check for a Windows Security confirmation dialog and retry the Facebook/Instagram login.".into());
+                }
+                Err(error) => return Err(format!("Unable to check Windows certificate import: {error}")),
+            }
+        };
         if !status.success() {
             return Err(format!(
-                "Windows could not trust the Meta Manager localhost certificate (certutil exit: {status}).                  Check Windows certificate policies before connecting Facebook or Instagram."
+                "Windows could not trust the Meta Manager localhost certificate (certutil exit: {status}). Check Windows certificate policies before connecting Facebook or Instagram."
             ));
         }
     }

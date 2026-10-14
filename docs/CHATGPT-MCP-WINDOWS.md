@@ -26,3 +26,6 @@ MCP Bridge v0.2.11+ reads this local file alongside its own categorized tunnel f
 - Facebook, Instagram and LinkedIn callback listeners now reject unrelated browser requests without consuming the authorization attempt.
 - LinkedIn's authorization request includes the officially supported `enable_extended_login=true` parameter to request Google/Apple/passkey login choices in external browsers. LinkedIn decides which options it displays.
 - Logs are still local by default; use MCP Bridge → Support diagnostics to review categorized failures and optionally open a private GitHub issue draft.
+## Windows MCP startup unblock (v0.1.26)
+
+Windows GitHub CI reproduced a launched desktop app with no running MCP listener or MCP startup log. The previous initialization sequence invoked Windows localhost-certificate import synchronously **before** launching MCP. v0.1.26 removes certificate operations from desktop startup: the MCP listener initializes independently; trust configuration is attempted only when starting Facebook or Instagram authorization, and any Windows certificate-import process has a bounded timeout. Windows CI verifies this by launching the packaged desktop executable and querying `/health`, not just running the standalone Node script.
