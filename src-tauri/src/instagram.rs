@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::{db, meta};
 
-const REDIRECT_URI: &str = "https://127.0.0.1:38937/oauth/instagram/callback";
+const REDIRECT_URI: &str = "https://meta-manager-auth.vercel.app/oauth/instagram/callback";
 const APP_ID: &str = "2228119617760136";
 const OAUTH_BROKER_URL: &str = "https://meta-manager-auth.vercel.app/api/exchange";
 
@@ -57,7 +57,6 @@ pub fn save_config(app: &AppHandle, app_id: String, secret: Option<String>) -> R
 
 pub fn prepare_oauth(app: &AppHandle) -> Result<InstagramOAuthPlan, String> {
     let app_id = APP_ID.to_string();
-    meta::ensure_local_tls_material(app)?;
 
     let state = Uuid::new_v4().to_string();
     db::set_setting(app, "instagram_oauth_state", &state)?;
@@ -79,7 +78,6 @@ pub fn prepare_oauth(app: &AppHandle) -> Result<InstagramOAuthPlan, String> {
 fn start_callback_server(app: AppHandle, generation: u64) -> Result<(), String> {
     let listener = TcpListener::bind("127.0.0.1:38937").map_err(|e| e.to_string())?;
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-    let config = meta::tls_config(&app)?;
     thread::spawn(move || {
         let started = std::time::Instant::now();
         loop {
@@ -100,17 +98,15 @@ fn start_callback_server(app: AppHandle, generation: u64) -> Result<(), String> 
                 Err(_) => break,
             };
             let _ = tcp.set_read_timeout(Some(std::time::Duration::from_secs(6)));
-            let conn = match rustls::ServerConnection::new(config.clone()) {
-                Ok(conn) => conn,
-                Err(error) => { let _ = app.emit("instagram-oauth-error", error.to_string()); break; }
-            };
-            let mut stream = rustls::StreamOwned::new(conn, tcp);
+            // Only the local HTTP listener accepts the code; the public HTTPS
+            // redirect is served by our existing OAuth broker.
+            let mut stream = tcp;
             let mut buffer = [0u8; 16384];
             let count = match stream.read(&mut buffer) {
                 Ok(count) => count,
                 Err(_) => {
-                    // Keep the listener alive if the browser rejects the local TLS certificate.
-                    crate::oauth::record_failure(&app, "instagram", "oauth callback TLS handshake failed");
+                    // Browser probes must not cancel an active OAuth attempt.
+                    crate::oauth::record_failure(&app, "instagram", "oauth callback read error");
                     continue;
                 }
             };
@@ -124,7 +120,7 @@ fn start_callback_server(app: AppHandle, generation: u64) -> Result<(), String> 
                 let _ = stream.flush();
                 continue;
             }
-            let full = format!("https://127.0.0.1:38937{target}");
+            let full = format!("http://127.0.0.1:38937{target}");
             let parsed = url::Url::parse(&full).ok();
             if parsed.as_ref().is_none_or(|url| !crate::oauth::is_callback_path(url, "/oauth/instagram/callback")) {
                 // Browser probes and favicon requests must not consume a one-time OAuth attempt.
@@ -141,6 +137,7 @@ fn start_callback_server(app: AppHandle, generation: u64) -> Result<(), String> 
                 Ok(output) => ("Instagram connected", format!("Connected @{}. You can close this browser tab.", output.username)),
                 Err(error) => ("Instagram connection failed", format!("{error}. You can close this browser tab.")),
             };
+            let body = body.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
             let html = format!("<!doctype html><html><head><meta charset='utf-8'><title>{title}</title><style>body{{font-family:system-ui;background:#f6f8fc;color:#17213b;display:grid;place-items:center;min-height:100vh;margin:0}}main{{background:white;border:1px solid #e7ebf3;border-radius:22px;padding:32px;max-width:560px;box-shadow:0 20px 60px #20305018}}p{{color:#6f7b91}}</style></head><body><main><h1>{title}</h1><p>{body}</p></main></body></html>");
             let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", html.len(), html);
             let _ = stream.write_all(response.as_bytes()); let _ = stream.flush();

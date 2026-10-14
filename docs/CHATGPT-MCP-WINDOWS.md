@@ -53,3 +53,10 @@ After updating, exit and reopen the Windows browser to pick up certificate-store
 ### Windows release-test correction (v0.1.30)
 
 The v0.1.29 tag did not produce an installer because the Windows Rust-test step ran before Tauri's bundled MCP resource was generated. v0.1.30 bundles the resources before certificate-chain tests and retains the certificate repair. Do not use v0.1.29 as a Windows installer.
+## Instagram public HTTPS callback (v0.1.31)
+
+Instagram Business Login on Windows no longer relies on a locally trusted HTTPS certificate. The app registers a local HTTP-only callback listener bound to `127.0.0.1:38937`; the provider redirects to a public HTTPS callback at `https://meta-manager-auth.vercel.app/oauth/instagram/callback`. That broker redirects only to the fixed `http://127.0.0.1:38937/oauth/instagram/callback`, preserving the `code` and the generated one-time `state`. The desktop app verifies `state` before exchanging the authorization code using the existing secret-managed broker. Access tokens remain stored on the desktop.
+
+The production broker must serve this callback *before* configuring Meta Business Login. Meta developers: Instagram API → API setup with Instagram login → Business Login settings → add the exact HTTPS callback (keep the legacy 127.0.0.1 HTTPS URI registered until all supported installs move). The broker's token exchange accepts both the legacy and public redirect URI during migration.
+
+During login, **Test Instagram browser callback** opens `http://127.0.0.1:38937/health`. This must display the local health screen before clicking **Allow**. A TLS-certificate exception must not be needed. No manual URL/code copying is required. This reduces dependency on Windows certificate trust and HTTPS interceptors. Node broker handoff tests are run locally and in Windows CI; real authorization requires end-to-end testing on the affected Windows machine.

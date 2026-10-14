@@ -2,7 +2,7 @@ import http from "node:http";
 
 const redirects = {
   meta: "https://127.0.0.1:38937/oauth/meta/callback",
-  instagram: "https://127.0.0.1:38937/oauth/instagram/callback",
+  instagram: "https://meta-manager-auth.vercel.app/oauth/instagram/callback",
   linkedin: "http://127.0.0.1:38937/oauth/linkedin/callback"
 };
 
@@ -104,10 +104,34 @@ const server=http.createServer(async(req,res)=>{try{
   if(req.method==="GET"&&path==="/privacy") return html(res,200,privacy);
   if(req.method==="GET"&&path==="/data-deletion") return html(res,200,deletion);
   if(req.method==="GET"&&path==="/api/config") return json(res,200,{metaAppId:"1079289208340048",instagramAppId:"2228119617760136",linkedinClientId:"77drthb7h6mp7m"});
+  if(req.method==="GET"&&path==="/oauth/instagram/callback"){
+    // The public HTTPS Instagram redirect hands off to the desktop's loopback
+    // HTTP listener, eliminating self-signed TLS certificates on Windows.
+    // Never redirect to a caller-selected host or persist authorization codes.
+    const url=new URL(req.url,"https://meta-manager-auth.vercel.app");
+    const code=url.searchParams.get("code");
+    const state=url.searchParams.get("state");
+    const error=url.searchParams.get("error");
+    const errorDescription=url.searchParams.get("error_description");
+    if(!code&&!error&&!errorDescription)return html(res,200,"<!doctype html><title>Instagram callback ready</title><h2>Meta Manager Instagram callback is ready</h2><p>Start login from the Meta Manager desktop app.</p>");
+    if(!state||! /^[0-9a-f-]{36}$/i.test(state)||code?.length>4096||error?.length>300||errorDescription?.length>300){
+      return html(res,400,"<!doctype html><title>Invalid Instagram return</title><p>The Instagram authorization link is invalid. Restart login from the desktop app.</p>");
+    }
+    const local=new URL("http://127.0.0.1:38937/oauth/instagram/callback");
+    local.searchParams.set("state",state);
+    if(code)local.searchParams.set("code",code);
+    else{
+      if(error)local.searchParams.set("error",error);
+      if(errorDescription)local.searchParams.set("error_description",errorDescription);
+    }
+    res.writeHead(302,{"location":local.toString(),"cache-control":"no-store","pragma":"no-cache","referrer-policy":"no-referrer","x-content-type-options":"nosniff"});
+    return res.end();
+  }
+
   if(req.method!=="POST"||path!=="/api/exchange") return json(res,404,{error:"Not found"});
   const {provider,code,redirectUri}=await readJson(req);
   if(!provider||!code||!redirectUri)return json(res,400,{error:"missing fields"});
-  if(redirects[provider]!==redirectUri)return json(res,400,{error:"redirect not allowed"});
+  if(redirects[provider]!==redirectUri && !(provider==="instagram" && redirectUri==="https://127.0.0.1:38937/oauth/instagram/callback"))return json(res,400,{error:"redirect not allowed"});
 
   if(provider==="linkedin"){
     if(!process.env.LINKEDIN_CLIENT_SECRET)return json(res,503,{error:"LinkedIn backend credential not configured"});

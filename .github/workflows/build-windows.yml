@@ -32,6 +32,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Test public Instagram OAuth callback handoff
+        run: node web/test-callback.mjs
+
       - name: Prepare bundled Node runtime
         shell: powershell
         run: ./scripts/prepare-windows-node.ps1
