@@ -1,4 +1,5 @@
 import http from "node:http";
+import {exchangeInstagramToken, publicInstagramError} from "./instagram-exchange.mjs";
 
 const redirects = {
   meta: "https://127.0.0.1:38937/oauth/meta/callback",
@@ -140,11 +141,13 @@ const server=http.createServer(async(req,res)=>{try{
   }
 
   if(provider==="instagram"){
-    if(!process.env.INSTAGRAM_APP_SECRET)return json(res,503,{error:"Instagram backend credential not configured"});
-    const short=await form("https://api.instagram.com/oauth/access_token",{client_id:"2228119617760136",client_secret:process.env.INSTAGRAM_APP_SECRET,grant_type:"authorization_code",redirect_uri:redirectUri,code});
-    const r=await fetch("https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret="+encodeURIComponent(process.env.INSTAGRAM_APP_SECRET)+"&access_token="+encodeURIComponent(short.access_token));
-    const t=await r.text();let d;try{d=JSON.parse(t)}catch{d={raw:t}}if(!r.ok)throw new Error(d.error?.message||t);
-    return json(res,200,d);
+    if(!process.env.INSTAGRAM_APP_SECRET)return json(res,503,{error:"Instagram backend credential not configured",stage:"instagram_configuration",reason:"instagram_secret_missing"});
+    const token=await exchangeInstagramToken({
+      clientId:"2228119617760136",
+      clientSecret:process.env.INSTAGRAM_APP_SECRET,
+      redirectUri,code
+    });
+    return json(res,200,token);
   }
 
   if(provider==="meta"){
@@ -157,6 +160,16 @@ const server=http.createServer(async(req,res)=>{try{
   }
 
   return json(res,400,{error:"unsupported provider"});
-}catch(e){return json(res,502,{error:String(e?.message||e)});}});
+}catch(e){
+  const safe = publicInstagramError(e);
+  if(safe){
+    // Categories and upstream HTTP status only. Never log codes, tokens or secrets.
+    console.warn("instagram_exchange_failure",JSON.stringify({
+      stage:safe.body.stage,reason:safe.body.reason,providerHttpStatus:safe.body.providerHttpStatus
+    }));
+    return json(res,safe.status,safe.body);
+  }
+  return json(res,502,{error:String(e?.message||e)});
+}});
 
 server.listen(process.env.PORT||3000);

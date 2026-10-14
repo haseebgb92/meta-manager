@@ -32,6 +32,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Test Instagram token exchange error classification
+        run: node web/test-exchange.mjs
+
       - name: Test public Instagram OAuth callback handoff
         run: node web/test-callback.mjs
 

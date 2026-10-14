@@ -16,18 +16,34 @@ pub fn is_current(generation: u64) -> bool {
 pub fn broker_failure(provider: &str, error: ureq::Error) -> String {
     match error {
         ureq::Error::Status(status, response) => {
-            let reason = response.into_json::<serde_json::Value>().ok()
-                .and_then(|body| {
-                    body.get("error_description")
-                        .or_else(|| body.get("error"))
-                        .or_else(|| body.get("message"))
-                        .and_then(|value| value.as_str())
-                        .map(str::to_string)
-                })
-                .unwrap_or_else(|| "The authorization server rejected this code".to_string());
-            // Do not expose authorization codes, URL query strings or bearer tokens.
-            let safe = reason.replace(['\r','\n'], " ");
-            format!("{provider} authorization failed (HTTP {status}): {}",
+            let body = response.into_json::<serde_json::Value>().unwrap_or_default();
+            // These two fields are server-defined categories, not arbitrary error text.
+            let stage = match body.get("stage").and_then(|v| v.as_str()) {
+                Some("instagram_code_exchange") => "instagram_code_exchange",
+                Some("instagram_long_token_exchange") => "instagram_long_token_exchange",
+                Some("instagram_configuration") => "instagram_configuration",
+                _ => "",
+            };
+            let reason_code = match body.get("reason").and_then(|v| v.as_str()) {
+                Some("instagram_code_invalid") => "instagram_code_invalid",
+                Some("instagram_code_expired_or_used") => "instagram_code_expired_or_used",
+                Some("instagram_redirect_mismatch") => "instagram_redirect_mismatch",
+                Some("instagram_client_configuration") => "instagram_client_configuration",
+                Some("instagram_permission_denied") => "instagram_permission_denied",
+                Some("instagram_rate_limited") => "instagram_rate_limited",
+                Some("instagram_network_error") => "instagram_network_error",
+                Some("instagram_short_token_missing") => "instagram_short_token_missing",
+                Some("instagram_upstream_rejected") => "instagram_upstream_rejected",
+                _ => "",
+            };
+            let reason = body.get("error_description").or_else(|| body.get("error"))
+                .or_else(|| body.get("message"))
+                .and_then(|v| v.as_str()).unwrap_or("The authorization server rejected this code");
+            let safe = reason.replace(['\r', '\n'], " ");
+            let marker = if !stage.is_empty() && !reason_code.is_empty() {
+                format!(" [{stage}/{reason_code}]")
+            } else { String::new() };
+            format!("{provider} authorization failed (HTTP {status}): {}{marker}",
                 safe.chars().take(220).collect::<String>())
         }
         ureq::Error::Transport(error) => {
@@ -43,7 +59,16 @@ pub fn record_failure(app: &tauri::AppHandle, component: &str, error: &str) {
     use tauri::Manager;
 
     let description = error.to_ascii_lowercase();
-    let kind = if description.contains("oauth redirect unreachable") { "network_connection" } else if description.contains("38937") || description.contains("address already in use") {
+    let kind = if description.contains("instagram_code_invalid") { "oauth_instagram_code_invalid" }
+    else if description.contains("instagram_code_expired_or_used") { "oauth_instagram_code_expired_or_used" }
+    else if description.contains("instagram_redirect_mismatch") { "oauth_instagram_redirect_mismatch" }
+    else if description.contains("instagram_client_configuration") { "oauth_instagram_client_configuration" }
+    else if description.contains("instagram_permission_denied") { "oauth_instagram_permission_denied" }
+    else if description.contains("instagram_rate_limited") { "oauth_instagram_rate_limited" }
+    else if description.contains("instagram_network_error") { "oauth_instagram_network_error" }
+    else if description.contains("instagram_short_token_missing") { "oauth_instagram_short_token_missing" }
+    else if description.contains("instagram_upstream_rejected") { "oauth_instagram_upstream_rejected" }
+    else if description.contains("oauth redirect unreachable") { "network_connection" } else if description.contains("38937") || description.contains("address already in use") {
         "oauth_callback_port"
     } else if description.contains("certificate") || description.contains("certutil") || description.contains("tls") {
         "oauth_local_certificate"
@@ -66,6 +91,11 @@ pub fn record_failure(app: &tauri::AppHandle, component: &str, error: &str) {
         let digits: String = chunk.chars().take_while(|c| c.is_ascii_digit()).take(3).collect();
         if digits.len() == 3 { digits.parse::<u16>().ok() } else { None }
     });
+    let stage = if description.contains("instagram_long_token_exchange") {
+        Some("instagram_long_token_exchange")
+    } else if description.contains("instagram_code_exchange") {
+        Some("instagram_code_exchange")
+    } else { None };
     let component = match component {
         "facebook" => "facebook",
         "instagram" => "instagram",
@@ -85,6 +115,7 @@ pub fn record_failure(app: &tauri::AppHandle, component: &str, error: &str) {
         "source": "meta-manager",
         "component": component,
         "kind": kind,
+        "stage": stage,
         "httpStatus": http_status,
         "at": chrono::Utc::now().to_rfc3339(),
     });
