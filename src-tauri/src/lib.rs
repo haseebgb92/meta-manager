@@ -107,7 +107,9 @@ fn save_linkedin_personal_secret(app: tauri::AppHandle, secret: String) -> Resul
 
 #[tauri::command]
 fn prepare_linkedin_oauth(app: tauri::AppHandle) -> Result<linkedin::LinkedInOAuthPlan, String> {
-    linkedin::prepare_personal_oauth(&app)
+    let result = linkedin::prepare_personal_oauth(&app);
+    if let Err(error) = &result { oauth::record_failure(&app, "linkedin", error); }
+    result
 }
 
 #[tauri::command]
@@ -122,7 +124,9 @@ fn save_instagram_config(app: tauri::AppHandle, app_id: String, secret: Option<S
 
 #[tauri::command]
 fn prepare_instagram_oauth(app: tauri::AppHandle) -> Result<instagram::InstagramOAuthPlan, String> {
-    instagram::prepare_oauth(&app)
+    let result = instagram::prepare_oauth(&app);
+    if let Err(error) = &result { oauth::record_failure(&app, "instagram", error); }
+    result
 }
 
 #[tauri::command]
@@ -146,7 +150,9 @@ fn save_meta_app_secret(app: tauri::AppHandle, secret: String) -> Result<(), Str
 
 #[tauri::command]
 fn prepare_meta_oauth(app: tauri::AppHandle, mode: Option<String>) -> Result<meta::MetaOAuthPlan, String> {
-    meta::prepare_oauth(&app, mode)
+    let result = meta::prepare_oauth(&app, mode);
+    if let Err(error) = &result { oauth::record_failure(&app, "facebook", error); }
+    result
 }
 
 #[tauri::command]
@@ -333,6 +339,7 @@ pub fn run() {
             let mcp_child = match spawn_mcp_service(app.handle()) {
                 Ok(child) => child,
                 Err(error) => {
+                    oauth::record_failure(app.handle(), "mcp", &error);
                     if let Ok(path) = mcp_log_path(app.handle()) {
                         let _ = std::fs::write(path, format!("{error}\n"));
                     }

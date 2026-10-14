@@ -602,7 +602,7 @@ function getServer() {
 }
 
 const app=createMcpExpressApp();
-app.get("/health",(_req,res)=>res.json({ok:true,service:"meta-manager-mcp",version:"0.1.23"}));
+app.get("/health",(_req,res)=>res.json({ok:true,service:"meta-manager-mcp",version:"0.1.24"}));
 app.post("/refresh",async(_req,res)=>{ try { res.json(await refreshAccountsFromMeta()); } catch(error) { res.status(500).json({ok:false,error:String(error)}); } });
 
 app.post("/mcp",async(req,res)=>{ const server=getServer(); const transport=new StreamableHTTPServerTransport({sessionIdGenerator:undefined}); try{ await server.connect(transport); await transport.handleRequest(req,res,req.body); } catch(error){ if(!res.headersSent) res.status(500).json({jsonrpc:"2.0",error:{code:-32603,message:String(error)},id:null}); } finally { res.on("close",()=>{transport.close();server.close();}); } });

@@ -13,3 +13,8 @@
 Do not paste Runtime API keys into chat or put them in installer files. The Bridge's built-in tunnel client and Node runtime run the schema-transparent Meta Manager proxy, which passes the latest MCP tools through the secure tunnel. Cloud-scheduled jobs run independently of the PC after cloud enrollment, but **ChatGPT's local MCP tools require Meta Manager and the Bridge to be running**.
 
 The installer does **not** configure social accounts or issue OpenAI tunnel IDs automatically. Account permissions, tunnel creation and the actual ChatGPT connection require the user's authorization.
+## Error reporting for Windows
+
+Meta Manager v0.1.24+ writes categorized failures to `%APPDATA%\\com.advertpreneur.metamanager\\diagnostics.jsonl`. Each record contains only its origin, failure category, optional HTTP status and timestamp. It intentionally excludes OAuth codes, states, tokens, accounts, URLs and raw exception text.
+
+MCP Bridge v0.2.11+ reads this local file alongside its own categorized tunnel failures from **Support diagnostics → Generate report**. Select **Open GitHub issue draft** only after reviewing the report. The issue is not submitted automatically and requires access to the private Meta Manager repository. If GitHub is unavailable, copy the sanitized report to a secure support channel instead.

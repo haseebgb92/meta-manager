@@ -530,6 +530,7 @@ fn start_callback_server(app: AppHandle, generation: u64) -> Result<(), String> 
                     let _ = app.emit("meta-oauth-complete", output);
                 }
                 Err(error) => {
+                    crate::oauth::record_failure(&app, "facebook", &error);
                     let _ = app.emit("meta-oauth-error", error);
                 }
             }

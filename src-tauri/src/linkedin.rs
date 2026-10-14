@@ -174,6 +174,7 @@ fn start_callback_server(app: AppHandle, generation: u64) -> Result<(), String> 
                     let _ = app.emit("linkedin-oauth-complete", output);
                 }
                 Err(error) => {
+                    crate::oauth::record_failure(&app, "linkedin", &error);
                     let _ = app.emit("linkedin-oauth-error", error);
                 }
             }

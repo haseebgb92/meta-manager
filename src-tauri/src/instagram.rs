@@ -122,7 +122,8 @@ fn start_callback_server(app: AppHandle, generation: u64) -> Result<(), String> 
             let _ = stream.write_all(response.as_bytes()); let _ = stream.flush();
             match result {
                 Ok(output) => { let _ = app.emit("instagram-oauth-complete", output); }
-                Err(error) => { let _ = app.emit("instagram-oauth-error", error); }
+                Err(error) => { crate::oauth::record_failure(&app, "instagram", &error);
+                    let _ = app.emit("instagram-oauth-error", error); }
             }
             crate::oauth::cancel_attempt();
             break;

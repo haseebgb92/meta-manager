@@ -1224,6 +1224,7 @@ function App() {
               <p><b>3.</b> Save settings, choose <b>Start Meta</b>, then connect that tunnel in ChatGPT.</p>
               <button className="secondary-page-button" onClick={() => void openUrl("https://github.com/haseebgb92/ChatGPT-MCp/releases")}>Get ChatGPT MCP Bridge</button>
               <small className="settings-help">The tunnel ID is entered and stored by Bridge, not by Meta Manager. The Runtime API key never belongs in a public URL. Keep both apps running for local ChatGPT access; cloud-scheduled jobs continue separately.</small>
+              <p className="settings-help"><b>Connection failing?</b> Meta Manager privately records categorized OAuth and MCP startup failures. In MCP Bridge, open <b>Support diagnostics → Generate report</b> to review a combined report, then optionally open a GitHub issue draft. No secrets or raw logs are automatically uploaded.</p>
             </article><article className="card settings-card"><h3>Local Services</h3><div><span>SQLite</span><b>Online</b></div><div><span>Scheduler</span><b>Every 30 seconds</b></div><div><span>Connected workspaces</span><b>{localAccounts.length}</b></div><div><span>Publishing queue</span><b>{scheduledCount} scheduled</b></div><div><span>MCP service</span><b>{mcpStatus?.online ? "Online" : "Offline"}</b></div><div><span>MCP endpoint</span><code>{mcpStatus?.endpoint ?? "http://127.0.0.1:38939/mcp"}</code></div><small className="settings-help">{mcpStatus?.diagnostic ?? "Checking MCP service..."}</small></article></div>
           </section>
         )}
