@@ -5,6 +5,7 @@ mod cloud;
 mod linkedin;
 mod meta;
 mod oauth;
+mod tls_cert;
 
 use db::{Account, CalendarItem, CalendarItemInput};
 use std::{

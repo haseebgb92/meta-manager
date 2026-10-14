@@ -2212,7 +2212,7 @@ dependencies = [
 
 [[package]]
 name = "meta-manager"
-version = "0.1.28"
+version = "0.1.29"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -2228,6 +2228,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-log",
  "tauri-plugin-opener",
+ "time",
  "tiny_http",
  "ureq",
  "url",

@@ -39,3 +39,14 @@ The Instagram Business Login consent page redirects the browser to the local HTT
 While the Instagram connection is still waiting, click **Test Instagram browser callback**. A separate browser tab opens `https://127.0.0.1:38937/health`, which must say **Meta Manager Instagram callback is reachable**. This test does not consume or cancel OAuth authorization. If the test fails, inspect the browser's general error code (for example, connection refused or certificate authority), and check Windows certificate trust and local security software. A browser restart may be necessary after certificate trust is first installed.
 
 Meta Manager records a privacy-safe TLS failure category when HTTPS negotiation fails, and a network-connection category if the Instagram authorization never returns. Generate a report in MCP Bridge, but never paste or upload the final callback URL or its `code`/`state` parameters; they are sensitive and short-lived. Successful OAuth still uses the registered redirect URL.
+## Windows Instagram local TLS certificate repair (v0.1.29)
+
+GitHub issue #4 shows six Instagram `oauth_local_certificate` failures while the local MCP service is reachable. v0.1.29 changes how Windows creates its OAuth HTTPS credentials:
+
+- Replaces the previous self-signed end-entity certificate (previously installed in the user Root store) with a **separate dedicated local CA** and an end-entity certificate signed by that CA.
+- The server certificate has an IP address SAN for `127.0.0.1`, a DNS SAN for `localhost`, Server Authentication extended key usage, and a 350-day validity.
+- The CA key exists only during certificate generation; it is not saved. The app stores `ca-v2.crt`, `localhost-v2.crt`, and `localhost-v2.key` in its own app-data `certs` folder. Previous files are left untouched, so the update does not remove user certificates.
+- When initiating Facebook or Instagram authorization, Windows imports **only this local CA public certificate** to the current user's Root certificate store. No administrator permission is required under normal policies.
+- The release workflow runs localhost certificate-generation tests and continues to test packaged Windows MCP startup.
+
+After updating, exit and reopen the Windows browser to pick up certificate-store changes. Start a fresh Instagram connection, click **Test Instagram browser callback**, and confirm the local `https://127.0.0.1:38937/health` page loads without a TLS warning before pressing **Allow**. If Windows security policy prevents the CA import, Meta Manager should display the certutil failure. Existing older trusted local certificate entries may require a targeted cleanup later; do not delete unrelated Windows root certificates.

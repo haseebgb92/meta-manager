@@ -224,29 +224,22 @@ pub(crate) fn ensure_local_tls_material(app: &AppHandle) -> Result<(), String> {
     cert_dir.push("certs");
     fs::create_dir_all(&cert_dir).map_err(|e| e.to_string())?;
 
+    // Windows uses a fresh v2 CA/leaf chain instead of the older self-signed leaf.
+    let suffix = if cfg!(windows) { "-v2" } else { "" };
     let ca_key = cert_dir.join("ca.key");
-    let ca_crt = cert_dir.join("ca.crt");
-    let server_key = cert_dir.join("localhost.key");
-    let server_crt = cert_dir.join("localhost.crt");
+    let ca_crt = cert_dir.join(format!("ca{suffix}.crt"));
+    let server_key = cert_dir.join(format!("localhost{suffix}.key"));
+    let server_crt = cert_dir.join(format!("localhost{suffix}.crt"));
     let csr = cert_dir.join("localhost.csr");
     let config = cert_dir.join("localhost.cnf");
 
     #[cfg(windows)]
     if !(ca_crt.exists() && server_key.exists() && server_crt.exists()) {
-        use rcgen::{generate_simple_self_signed, CertifiedKey};
-        let CertifiedKey { cert, signing_key } = generate_simple_self_signed(vec![
-            "localhost".to_string(),
-            "127.0.0.1".to_string(),
-        ])
-        .map_err(|e| format!("Unable to generate local Windows TLS certificate: {e}"))?;
-
-        let cert_pem = cert.pem();
-        let key_pem = signing_key.serialize_pem();
-        fs::write(&server_crt, cert_pem.as_bytes()).map_err(|e| e.to_string())?;
-        fs::write(&server_key, key_pem.as_bytes()).map_err(|e| e.to_string())?;
-        // Trust the exact self-signed localhost certificate for the current user.
-        fs::write(&ca_crt, cert_pem.as_bytes()).map_err(|e| e.to_string())?;
-        fs::write(&ca_key, key_pem.as_bytes()).map_err(|e| e.to_string())?;
+        let certs = crate::tls_cert::generate_local_cert_bundle()?;
+        // CA signing key remains only in memory; never write it to disk.
+        fs::write(&ca_crt, certs.ca_pem).map_err(|e| format!("Cannot save OAuth local CA: {e}"))?;
+        fs::write(&server_crt, certs.server_pem).map_err(|e| format!("Cannot save OAuth server certificate: {e}"))?;
+        fs::write(&server_key, certs.server_key_pem).map_err(|e| format!("Cannot save OAuth server key: {e}"))?;
     }
 
     #[cfg(not(windows))]
@@ -404,8 +397,9 @@ pub(crate) fn ensure_local_tls_material(app: &AppHandle) -> Result<(), String> {
 pub(crate) fn tls_config(app: &AppHandle) -> Result<Arc<rustls::ServerConfig>, String> {
     let mut cert_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     cert_dir.push("certs");
-    let cert_path = cert_dir.join("localhost.crt");
-    let key_path = cert_dir.join("localhost.key");
+    let suffix = if cfg!(windows) { "-v2" } else { "" };
+    let cert_path = cert_dir.join(format!("localhost{suffix}.crt"));
+    let key_path = cert_dir.join(format!("localhost{suffix}.key"));
 
     let cert_file =
         fs::File::open(cert_path).map_err(|e| format!("Local TLS certificate missing: {e}"))?;

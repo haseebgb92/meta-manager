@@ -36,6 +36,9 @@ jobs:
         shell: powershell
         run: ./scripts/prepare-windows-node.ps1
 
+      - name: Verify localhost TLS certificate chain
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib tls_cert::tests -- --nocapture
+
       - name: Build NSIS installer
         run: npm run tauri -- build --bundles nsis
 

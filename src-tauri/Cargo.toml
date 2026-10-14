@@ -1,6 +1,6 @@
 [package]
 name = "meta-manager"
-version = "0.1.28"
+version = "0.1.29"
 description = "Local-first Meta social publishing and analytics manager"
 authors = ["Advertpreneur"]
 license = ""
@@ -35,5 +35,5 @@ url = "2.5"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pemfile = "2.2"
 
-[target.'cfg(windows)'.dependencies]
 rcgen = { version = "0.14.10", features = ["pem"] }
+time = "0.3"
