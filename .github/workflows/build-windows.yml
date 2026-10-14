@@ -95,7 +95,19 @@ jobs:
               } catch {}
               if ($app.HasExited) { break }
             }
-            if (-not $ready) { throw "Packaged Meta Manager app did not launch its local MCP service" }
+            if (-not $ready) {
+              Write-Host "Packaged executable still running: $(-not $app.HasExited)"
+              if ($app.HasExited) { Write-Host "Packaged executable exit code: $($app.ExitCode)" }
+              $dataRoot = Join-Path $env:APPDATA "com.advertpreneur.metamanager"
+              $mcpLog = Join-Path $dataRoot "meta-manager-mcp.log"
+              Write-Host "Windows app-data folder exists: $(Test-Path $dataRoot)"
+              Write-Host "MCP startup log exists: $(Test-Path $mcpLog)"
+              if (Test-Path $mcpLog) {
+                Write-Host "MCP startup log (Windows CI test environment):"
+                Get-Content $mcpLog -Tail 30
+              }
+              throw "Packaged Meta Manager app did not launch its local MCP service"
+            }
             Write-Host "Windows desktop integration smoke test OK"
           } finally {
             if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue }
