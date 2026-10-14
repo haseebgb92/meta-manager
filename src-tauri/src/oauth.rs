@@ -43,7 +43,7 @@ pub fn record_failure(app: &tauri::AppHandle, component: &str, error: &str) {
     use tauri::Manager;
 
     let description = error.to_ascii_lowercase();
-    let kind = if description.contains("38937") || description.contains("address already in use") {
+    let kind = if description.contains("oauth redirect unreachable") { "network_connection" } else if description.contains("38937") || description.contains("address already in use") {
         "oauth_callback_port"
     } else if description.contains("certificate") || description.contains("certutil") || description.contains("tls") {
         "oauth_local_certificate"

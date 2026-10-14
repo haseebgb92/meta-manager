@@ -32,3 +32,10 @@ Windows GitHub CI reproduced a launched desktop app with no running MCP listener
 ## Windows Node argument-path correction (v0.1.27)
 
 A stronger NSIS extracted-desktop integration test found that Windows Node startup failed with `EISDIR: lstat 'D:'` when the desktop app invoked a bundled MCP script via its absolute resource path. The service launcher now sets its working directory to the script resource directory and passes only the script filename as the Node argument. The Windows workflow requires the extracted desktop app to respond successfully at `http://127.0.0.1:38939/health` before publishing a release.
+## Instagram authorization callback test (v0.1.28)
+
+The Instagram Business Login consent page redirects the browser to the local HTTPS listener at `https://127.0.0.1:38937/oauth/instagram/callback`. If it displays "page might have moved" after **Allow**, the app may never receive the callback.
+
+While the Instagram connection is still waiting, click **Test Instagram browser callback**. A separate browser tab opens `https://127.0.0.1:38937/health`, which must say **Meta Manager Instagram callback is reachable**. This test does not consume or cancel OAuth authorization. If the test fails, inspect the browser's general error code (for example, connection refused or certificate authority), and check Windows certificate trust and local security software. A browser restart may be necessary after certificate trust is first installed.
+
+Meta Manager records a privacy-safe TLS failure category when HTTPS negotiation fails, and a network-connection category if the Instagram authorization never returns. Generate a report in MCP Bridge, but never paste or upload the final callback URL or its `code`/`state` parameters; they are sensitive and short-lived. Successful OAuth still uses the registered redirect URL.

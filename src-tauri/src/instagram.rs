@@ -85,8 +85,9 @@ fn start_callback_server(app: AppHandle, generation: u64) -> Result<(), String> 
         loop {
             if !crate::oauth::is_current(generation) || started.elapsed() > std::time::Duration::from_secs(600) {
                 if crate::oauth::is_current(generation) {
+                    crate::oauth::record_failure(&app, "instagram", "oauth redirect unreachable: Instagram did not return to the local callback");
                     crate::oauth::cancel_attempt();
-                    let _ = app.emit("instagram-oauth-error", "Instagram login expired. You can try again.".to_string());
+                    let _ = app.emit("instagram-oauth-error", "Instagram did not return to Meta Manager's local HTTPS callback. Check the callback browser test or retry.".to_string());
                 }
                 break;
             }
@@ -105,10 +106,24 @@ fn start_callback_server(app: AppHandle, generation: u64) -> Result<(), String> 
             };
             let mut stream = rustls::StreamOwned::new(conn, tcp);
             let mut buffer = [0u8; 16384];
-            let count = stream.read(&mut buffer).unwrap_or(0);
+            let count = match stream.read(&mut buffer) {
+                Ok(count) => count,
+                Err(_) => {
+                    // Keep the listener alive if the browser rejects the local TLS certificate.
+                    crate::oauth::record_failure(&app, "instagram", "oauth callback TLS handshake failed");
+                    continue;
+                }
+            };
             if count == 0 { continue; }
             let request = String::from_utf8_lossy(&buffer[..count]);
             let target = request.lines().next().and_then(|l| l.split_whitespace().nth(1)).unwrap_or("/");
+            if target == "/health" {
+                let body = "<!doctype html><title>Instagram callback ready</title><h2>Meta Manager Instagram callback is reachable</h2><p>Return to the Instagram sign-in tab and press Allow. Keep Meta Manager open.</p>";
+                let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n{}", body.len(), body);
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+                continue;
+            }
             let full = format!("https://127.0.0.1:38937{target}");
             let parsed = url::Url::parse(&full).ok();
             if parsed.as_ref().is_none_or(|url| !crate::oauth::is_callback_path(url, "/oauth/instagram/callback")) {
@@ -140,6 +155,7 @@ fn start_callback_server(app: AppHandle, generation: u64) -> Result<(), String> 
     });
     Ok(())
 }
+
 
 fn complete_oauth(app: &AppHandle, code: Option<String>, state: Option<String>) -> Result<InstagramOAuthResult, String> {
     let code = code.ok_or_else(|| "Instagram did not return an authorization code".to_string())?;
