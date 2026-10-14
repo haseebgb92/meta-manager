@@ -50,3 +50,6 @@ GitHub issue #4 shows six Instagram `oauth_local_certificate` failures while the
 - The release workflow runs localhost certificate-generation tests and continues to test packaged Windows MCP startup.
 
 After updating, exit and reopen the Windows browser to pick up certificate-store changes. Start a fresh Instagram connection, click **Test Instagram browser callback**, and confirm the local `https://127.0.0.1:38937/health` page loads without a TLS warning before pressing **Allow**. If Windows security policy prevents the CA import, Meta Manager should display the certutil failure. Existing older trusted local certificate entries may require a targeted cleanup later; do not delete unrelated Windows root certificates.
+### Windows release-test correction (v0.1.30)
+
+The v0.1.29 tag did not produce an installer because the Windows Rust-test step ran before Tauri's bundled MCP resource was generated. v0.1.30 bundles the resources before certificate-chain tests and retains the certificate repair. Do not use v0.1.29 as a Windows installer.

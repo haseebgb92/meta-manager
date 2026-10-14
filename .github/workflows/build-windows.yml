@@ -36,6 +36,9 @@ jobs:
         shell: powershell
         run: ./scripts/prepare-windows-node.ps1
 
+      - name: Prepare bundled MCP resources for Rust tests
+        run: npm run mcp:bundle
+
       - name: Verify localhost TLS certificate chain
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib tls_cert::tests -- --nocapture
 
