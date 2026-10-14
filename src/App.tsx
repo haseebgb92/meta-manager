@@ -20,6 +20,7 @@ import {
   WandSparkles,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
 import {
   getCloudStatus, cloudSendCode, cloudVerifyCode, cloudConnectExisting, cloudConnectAccount,
@@ -1213,6 +1214,16 @@ function App() {
               {mediaHostStatus?.configured ? <small>Configured: {mediaHostStatus.siteUrl}</small> : null}
               {mediaHostMessage ? <p className="setup-message">{mediaHostMessage}</p> : null}
               <small className="settings-help">Create a dedicated Application Password in WordPress → Users → Profile. Credentials are stored on your own computer.</small>
+            </article><article className="card settings-card">
+              <h3>Connect ChatGPT — MCP</h3>
+              <p>Use a separate, secure tunnel to connect ChatGPT to Meta Manager's local publishing, calendar and research tools.</p>
+              <div><span>Local MCP service</span><b>{mcpStatus?.online ? "Online" : "Start Meta Manager"}</b></div>
+              <div><span>Local endpoint (not a public URL)</span><code>{mcpStatus?.endpoint ?? "http://127.0.0.1:38939/mcp"}</code></div>
+              <p><b>1.</b> Install the ChatGPT MCP Bridge companion on this PC.</p>
+              <p><b>2.</b> In Bridge, enter your OpenAI Runtime API key and a <b>dedicated Meta Manager tunnel ID</b> (<code>tunnel_...</code>). Use a different ID from Local or Web MCP.</p>
+              <p><b>3.</b> Save settings, choose <b>Start Meta</b>, then connect that tunnel in ChatGPT.</p>
+              <button className="secondary-page-button" onClick={() => void openUrl("https://github.com/haseebgb92/ChatGPT-MCp/releases")}>Get ChatGPT MCP Bridge</button>
+              <small className="settings-help">The tunnel ID is entered and stored by Bridge, not by Meta Manager. The Runtime API key never belongs in a public URL. Keep both apps running for local ChatGPT access; cloud-scheduled jobs continue separately.</small>
             </article><article className="card settings-card"><h3>Local Services</h3><div><span>SQLite</span><b>Online</b></div><div><span>Scheduler</span><b>Every 30 seconds</b></div><div><span>Connected workspaces</span><b>{localAccounts.length}</b></div><div><span>Publishing queue</span><b>{scheduledCount} scheduled</b></div><div><span>MCP service</span><b>{mcpStatus?.online ? "Online" : "Offline"}</b></div><div><span>MCP endpoint</span><code>{mcpStatus?.endpoint ?? "http://127.0.0.1:38939/mcp"}</code></div></article></div>
           </section>
         )}
