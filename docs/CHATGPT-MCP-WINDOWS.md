@@ -18,3 +18,11 @@ The installer does **not** configure social accounts or issue OpenAI tunnel IDs 
 Meta Manager v0.1.24+ writes categorized failures to `%APPDATA%\\com.advertpreneur.metamanager\\diagnostics.jsonl`. Each record contains only its origin, failure category, optional HTTP status and timestamp. It intentionally excludes OAuth codes, states, tokens, accounts, URLs and raw exception text.
 
 MCP Bridge v0.2.11+ reads this local file alongside its own categorized tunnel failures from **Support diagnostics → Generate report**. Select **Open GitHub issue draft** only after reviewing the report. The issue is not submitted automatically and requires access to the private Meta Manager repository. If GitHub is unavailable, copy the sanitized report to a secure support channel instead.
+## Windows repair and social-login updates (v0.1.25)
+
+- If Bridge reports "Meta Manager local MCP: not reachable", open Meta Manager **Settings → Connect ChatGPT — MCP → Restart / repair local MCP**. Confirm **Online** before selecting **Start Meta** in MCP Bridge.
+- The app now checks the HTTP health response from the actual Meta Manager server rather than assuming an arbitrary open port is healthy.
+- The bundled service has fallback resource paths for alternate NSIS installations; if startup fails, Settings displays the failure from the local startup log.
+- Facebook, Instagram and LinkedIn callback listeners now reject unrelated browser requests without consuming the authorization attempt.
+- LinkedIn's authorization request includes the officially supported `enable_extended_login=true` parameter to request Google/Apple/passkey login choices in external browsers. LinkedIn decides which options it displays.
+- Logs are still local by default; use MCP Bridge → Support diagnostics to review categorized failures and optionally open a private GitHub issue draft.

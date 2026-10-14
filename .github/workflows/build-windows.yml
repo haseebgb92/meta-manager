@@ -62,6 +62,45 @@ jobs:
             if (-not $child.HasExited) { Stop-Process -Id $child.Id -Force }
           }
 
+      - name: Smoke-test packaged Windows desktop startup
+        shell: pwsh
+        run: |
+          $unpacker = Join-Path $env:ProgramFiles "7-Zip\7z.exe"
+          if (-not (Test-Path $unpacker)) { throw "Windows runner is missing 7-Zip" }
+          $installer = Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter "*setup.exe" | Select-Object -First 1
+          if (-not $installer) { throw "NSIS installer is missing" }
+          $dest = Join-Path $env:RUNNER_TEMP "meta-manager-smoketest"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          & $unpacker x -y $installer.FullName "-o$dest" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Could not unpack Windows installer" }
+          $appExe = Join-Path $dest "meta-manager.exe"
+          if (-not (Test-Path $appExe)) { throw "Installer does not contain meta-manager.exe" }
+          if (-not (Test-Path (Join-Path $dest "resources/windows/node.exe"))) {
+            throw "Installer does not contain bundled Node runtime"
+          }
+          if (-not (Test-Path (Join-Path $dest "resources/meta-manager-mcp.cjs"))) {
+            throw "Installer does not contain MCP service script"
+          }
+          $app = Start-Process -FilePath $appExe -WorkingDirectory $dest -PassThru
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              Start-Sleep -Milliseconds 500
+              try {
+                $health = Invoke-RestMethod "http://127.0.0.1:38939/health" -TimeoutSec 2
+                if ($health.ok -and $health.service -eq "meta-manager-mcp") {
+                  $ready = $true
+                  break
+                }
+              } catch {}
+              if ($app.HasExited) { break }
+            }
+            if (-not $ready) { throw "Packaged Meta Manager app did not launch its local MCP service" }
+            Write-Host "Windows desktop integration smoke test OK"
+          } finally {
+            if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue }
+          }
+
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:

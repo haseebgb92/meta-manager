@@ -98,6 +98,7 @@ fn start_callback_server(app: AppHandle, generation: u64) -> Result<(), String> 
                 }
                 Err(_) => break,
             };
+            let _ = tcp.set_read_timeout(Some(std::time::Duration::from_secs(6)));
             let conn = match rustls::ServerConnection::new(config.clone()) {
                 Ok(conn) => conn,
                 Err(error) => { let _ = app.emit("instagram-oauth-error", error.to_string()); break; }
@@ -105,13 +106,21 @@ fn start_callback_server(app: AppHandle, generation: u64) -> Result<(), String> 
             let mut stream = rustls::StreamOwned::new(conn, tcp);
             let mut buffer = [0u8; 16384];
             let count = stream.read(&mut buffer).unwrap_or(0);
+            if count == 0 { continue; }
             let request = String::from_utf8_lossy(&buffer[..count]);
             let target = request.lines().next().and_then(|l| l.split_whitespace().nth(1)).unwrap_or("/");
             let full = format!("https://127.0.0.1:38937{target}");
             let parsed = url::Url::parse(&full).ok();
+            if parsed.as_ref().is_none_or(|url| !crate::oauth::is_callback_path(url, "/oauth/instagram/callback")) {
+                // Browser probes and favicon requests must not consume a one-time OAuth attempt.
+                let body = "OAuth callback pending";
+                let response = format!("HTTP/1.1 404 Not Found\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+                let _ = stream.write_all(response.as_bytes());
+                continue;
+            }
             let code = parsed.as_ref().and_then(|u| u.query_pairs().find(|(k,_)| k=="code").map(|(_,v)| v.into_owned()));
             let state = parsed.as_ref().and_then(|u| u.query_pairs().find(|(k,_)| k=="state").map(|(_,v)| v.into_owned()));
-            let oauth_error = parsed.as_ref().and_then(|u| u.query_pairs().find(|(k,_)| k=="error_description").map(|(_,v)| v.into_owned()));
+            let oauth_error = parsed.as_ref().and_then(|u| u.query_pairs().find(|(k,_)| k=="error_description" || k=="error").map(|(_,v)| v.into_owned()));
             let result = if let Some(error)=oauth_error { Err(error) } else { complete_oauth(&app, code, state) };
             let (title, body) = match &result {
                 Ok(output) => ("Instagram connected", format!("Connected @{}. You can close this browser tab.", output.username)),

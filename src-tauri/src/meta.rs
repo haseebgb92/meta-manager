@@ -449,11 +449,12 @@ fn start_callback_server(app: AppHandle, generation: u64) -> Result<(), String> 
                 }
                 Err(_) => break,
             };
-            let conn = match rustls::ServerConnection::new(config) {
+            let _ = tcp.set_read_timeout(Some(std::time::Duration::from_secs(6)));
+            let conn = match rustls::ServerConnection::new(config.clone()) {
                 Ok(conn) => conn,
                 Err(error) => {
                     let _ = app.emit("meta-oauth-error", error.to_string());
-                    return;
+                    continue;
                 }
             };
             let mut stream = rustls::StreamOwned::new(conn, tcp);
@@ -462,7 +463,7 @@ fn start_callback_server(app: AppHandle, generation: u64) -> Result<(), String> 
                 Ok(read) => read,
                 Err(error) => {
                     let _ = app.emit("meta-oauth-error", error.to_string());
-                    return;
+                    continue;
                 }
             };
             let request_text = String::from_utf8_lossy(&request_bytes[..read]);
@@ -471,8 +472,14 @@ fn start_callback_server(app: AppHandle, generation: u64) -> Result<(), String> 
                 .next()
                 .and_then(|line| line.split_whitespace().nth(1))
                 .unwrap_or("/");
+            if read == 0 { continue; }
             let request_url = format!("https://127.0.0.1:38937{request_target}");
             let parsed = Url::parse(&request_url);
+            if parsed.as_ref().map_or(true, |url| !crate::oauth::is_callback_path(url, "/oauth/meta/callback")) {
+                let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                let _ = stream.write_all(response.as_bytes());
+                continue;
+            }
 
             let result = match parsed {
                 Ok(url) => {
@@ -486,7 +493,7 @@ fn start_callback_server(app: AppHandle, generation: u64) -> Result<(), String> 
                         .map(|(_, value)| value.into_owned());
                     let error = url
                         .query_pairs()
-                        .find(|(key, _)| key == "error_description")
+                        .find(|(key, _)| key == "error_description" || key == "error")
                         .map(|(_, value)| value.into_owned());
                     if let Some(error) = error {
                         Err(error)

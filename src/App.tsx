@@ -42,6 +42,7 @@ import {
   getLinkedInStatus,
   getInstagramStatus,
   getMcpStatus,
+  restartMcpService,
   getMetaConfigStatus,
   onMetaOAuthComplete,
   onMetaOAuthError,
@@ -199,6 +200,8 @@ function App() {
   const [calendarView, setCalendarView] = useState<"month" | "week" | "list">("month");
   const [viewingCalendarItem, setViewingCalendarItem] = useState<LocalCalendarItem | null>(null);
   const [mcpStatus, setMcpStatus] = useState<McpStatus | null>(null);
+  const [mcpRestarting, setMcpRestarting] = useState(false);
+  const [mcpRestartMessage, setMcpRestartMessage] = useState("");
   const [refreshingAccounts, setRefreshingAccounts] = useState(false);
   const [accountRefreshMessage, setAccountRefreshMessage] = useState("");
   const [accountDataRevision, setAccountDataRevision] = useState(0);
@@ -1217,7 +1220,17 @@ function App() {
             </article><article className="card settings-card">
               <h3>Connect ChatGPT — MCP</h3>
               <p>Use a separate, secure tunnel to connect ChatGPT to Meta Manager's local publishing, calendar and research tools.</p>
-              <div><span>Local MCP service</span><b>{mcpStatus?.online ? "Online" : "Start Meta Manager"}</b></div>
+              <div><span>Local MCP service</span><b>{mcpStatus?.online ? "Online" : "Offline — restart below"}</b></div>
+              <button className="secondary-page-button" disabled={mcpRestarting} onClick={() => {
+                setMcpRestarting(true);
+                setMcpRestartMessage("Restarting local service…");
+                void restartMcpService().then((result) => {
+                  setMcpStatus(result);
+                  setMcpRestartMessage(result.online ? "Local MCP service is running. Start Meta in MCP Bridge." : "Service is still offline.");
+                }).catch((error) => setMcpRestartMessage(String(error)))
+                  .finally(() => setMcpRestarting(false));
+              }}>{mcpRestarting ? "Restarting…" : "Restart / repair local MCP"}</button>
+              {mcpRestartMessage ? <p className="settings-help">{mcpRestartMessage}</p> : null}
               <div><span>Local endpoint (not a public URL)</span><code>{mcpStatus?.endpoint ?? "http://127.0.0.1:38939/mcp"}</code></div>
               <p><b>1.</b> Install the ChatGPT MCP Bridge companion on this PC.</p>
               <p><b>2.</b> In Bridge, enter your OpenAI Runtime API key and a <b>dedicated Meta Manager tunnel ID</b> (<code>tunnel_...</code>). Use a different ID from Local or Web MCP.</p>

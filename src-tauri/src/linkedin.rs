@@ -77,7 +77,7 @@ pub fn prepare_personal_oauth(app: &AppHandle) -> Result<LinkedInOAuthPlan, Stri
     start_callback_server(app.clone(), generation)?;
     let scopes = "openid profile email w_member_social";
     let authorization_url = format!(
-        "https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id={}&redirect_uri={}&state={}&scope={}",
+        "https://www.linkedin.com/oauth/v2/authorization?response_type=code&enable_extended_login=true&client_id={}&redirect_uri={}&state={}&scope={}",
         urlencoding::encode(PERSONAL_CLIENT_ID),
         urlencoding::encode(PERSONAL_REDIRECT_URI),
         urlencoding::encode(&state),
@@ -118,8 +118,10 @@ fn start_callback_server(app: AppHandle, generation: u64) -> Result<(), String> 
                 }
                 Err(_) => break,
             };
+            let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(6)));
             let mut buffer = [0u8; 16384];
             let count = stream.read(&mut buffer).unwrap_or(0);
+            if count == 0 { continue; }
             let request = String::from_utf8_lossy(&buffer[..count]);
             let target = request
                 .lines()
@@ -128,6 +130,12 @@ fn start_callback_server(app: AppHandle, generation: u64) -> Result<(), String> 
                 .unwrap_or("/");
             let full = format!("http://127.0.0.1:38937{target}");
             let parsed = url::Url::parse(&full).ok();
+            if parsed.as_ref().is_none_or(|url| !crate::oauth::is_callback_path(url, "/oauth/linkedin/callback")) {
+                // Ignore speculative browser requests, including /favicon.ico.
+                let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                let _ = stream.write_all(response.as_bytes());
+                continue;
+            }
             let code = parsed.as_ref().and_then(|url| {
                 url.query_pairs()
                     .find(|(k, _)| k == "code")
@@ -140,7 +148,7 @@ fn start_callback_server(app: AppHandle, generation: u64) -> Result<(), String> 
             });
             let oauth_error = parsed.as_ref().and_then(|url| {
                 url.query_pairs()
-                    .find(|(k, _)| k == "error_description")
+                    .find(|(k, _)| k == "error_description" || k == "error")
                     .map(|(_, v)| v.into_owned())
             });
 

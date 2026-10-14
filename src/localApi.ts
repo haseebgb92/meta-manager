@@ -217,6 +217,11 @@ export async function getMcpStatus(): Promise<McpStatus | null> {
   return invoke<McpStatus>("get_mcp_status");
 }
 
+export async function restartMcpService(): Promise<McpStatus> {
+  if (!isDesktop()) throw new Error("Meta Manager desktop application is required");
+  return invoke<McpStatus>("restart_mcp_service");
+}
+
 export type MetaRefreshResult = {
   message: string;
   accounts: Array<{

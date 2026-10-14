@@ -92,3 +92,23 @@ pub fn record_failure(app: &tauri::AppHandle, component: &str, error: &str) {
         let _ = writeln!(file, "{item}");
     }
 }
+pub fn is_callback_path(url: &url::Url, expected: &str) -> bool {
+    url.path() == expected
+}
+
+#[cfg(test)]
+mod callback_tests {
+    use super::is_callback_path;
+
+    #[test]
+    fn ignores_browser_probes_and_only_accepts_expected_oauth_callback() {
+        let valid = url::Url::parse("https://127.0.0.1:38937/oauth/instagram/callback?code=test&state=sample").unwrap();
+        let favicon = url::Url::parse("https://127.0.0.1:38937/favicon.ico").unwrap();
+        let root = url::Url::parse("https://127.0.0.1:38937/").unwrap();
+        let wrong_provider = url::Url::parse("http://127.0.0.1:38937/oauth/linkedin/callback?code=test").unwrap();
+        assert!(is_callback_path(&valid, "/oauth/instagram/callback"));
+        assert!(!is_callback_path(&favicon, "/oauth/instagram/callback"));
+        assert!(!is_callback_path(&root, "/oauth/instagram/callback"));
+        assert!(!is_callback_path(&wrong_provider, "/oauth/instagram/callback"));
+    }
+}

@@ -37,16 +37,30 @@ fn spawn_mcp_service(app: &tauri::AppHandle) -> Result<Option<Child>, String> {
     if TcpStream::connect("127.0.0.1:38939").is_ok() {
         return Ok(None);
     }
+    let bundled = |rel: &str| -> Result<std::path::PathBuf, String> {
+        let base = app.path().resource_dir().map_err(|e| e.to_string())?;
+        let mut candidates = vec![
+            app.path().resolve(rel, BaseDirectory::Resource).map_err(|e| e.to_string())?,
+            base.join(rel),
+            base.join(rel.strip_prefix("resources/").unwrap_or(rel)),
+        ];
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                candidates.push(dir.join(rel));
+                candidates.push(dir.join(rel.strip_prefix("resources/").unwrap_or(rel)));
+            }
+        }
+        candidates.into_iter().find(|file| file.is_file())
+            .ok_or_else(|| format!("Installed resource is missing: {rel}. Reinstall Meta Manager."))
+    };
     let script = if cfg!(debug_assertions) {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("resources").join("meta-manager-mcp.cjs")
     } else {
-        app.path().resolve("resources/meta-manager-mcp.cjs", BaseDirectory::Resource)
-            .map_err(|e| format!("Cannot locate bundled MCP script: {e}"))?
+        bundled("resources/meta-manager-mcp.cjs")?
     };
     let node_program = if cfg!(target_os = "windows") && !cfg!(debug_assertions) {
-        app.path().resolve("resources/windows/node.exe", BaseDirectory::Resource)
-            .map_err(|e| format!("Cannot locate bundled Node runtime: {e}"))?
+        bundled("resources/windows/node.exe")?
     } else {
         std::path::PathBuf::from("node")
     };
@@ -292,9 +306,50 @@ struct McpStatus {
     diagnostic: String,
 }
 
+fn mcp_health_online() -> bool {
+    ureq::get("http://127.0.0.1:38939/health")
+        .timeout(std::time::Duration::from_millis(800))
+        .call()
+        .ok()
+        .and_then(|response| response.into_json::<serde_json::Value>().ok())
+        .is_some_and(|json| json.get("ok").and_then(|v| v.as_bool()) == Some(true)
+            && json.get("service").and_then(|v| v.as_str()) == Some("meta-manager-mcp"))
+}
+
+#[tauri::command]
+fn restart_mcp_service(app: tauri::AppHandle, process: tauri::State<'_, McpProcess>) -> Result<McpStatus, String> {
+    {
+        let mut guard = process.0.lock().map_err(|e| format!("MCP process lock: {e}"))?;
+        if let Some(child) = guard.as_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        *guard = None;
+    }
+    // Never start a second Node process when a valid listener already exists.
+    if !mcp_health_online() {
+        let child = spawn_mcp_service(&app).map_err(|error| {
+            oauth::record_failure(&app, "mcp", &error);
+            error
+        })?;
+        let mut guard = process.0.lock().map_err(|e| e.to_string())?;
+        *guard = child;
+        drop(guard);
+        for _ in 0..35 {
+            if mcp_health_online() { break; }
+            std::thread::sleep(std::time::Duration::from_millis(120));
+        }
+    }
+    let status = get_mcp_status(app);
+    if !status.online {
+        return Err(format!("MCP service did not start: {}", status.diagnostic));
+    }
+    Ok(status)
+}
+
 #[tauri::command]
 fn get_mcp_status(app: tauri::AppHandle) -> McpStatus {
-    let online = TcpStream::connect("127.0.0.1:38939").is_ok();
+    let online = mcp_health_online();
     let diagnostic = if online {
         "Local MCP listener is responding on port 38939".into()
     } else {
@@ -385,6 +440,7 @@ pub fn run() {
             cloud_logout,
             get_live_insights,
             get_mcp_status,
+            restart_mcp_service,
             refresh_meta_accounts
         ])
         .run(tauri::generate_context!())
