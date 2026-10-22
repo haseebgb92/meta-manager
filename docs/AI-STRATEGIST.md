@@ -13,7 +13,8 @@ Maintain an independent, rolling **14-day** content calendar for each explicitly
 - A 14-day gap scanner that counts existing scheduled posts for the correct workspace and platform, including dual-platform legacy posts.
 - ChatGPT MCP **get_strategist_brief** (lists enabled brands and missing days) and **strategist_queue_post** (queues only a valid missing destination/date).
 - SQLite reservation with UNIQUE(account_id, platform, local_date) for retry-safety; pending drafts are reserved, and failed/stale reservations require human review.
-- Scheduled mode only when explicitly enabled in that workspace's settings. The tool never publishes immediately.
+- Posts require a current workspace-specific profile fingerprint from the ChatGPT brief; stale or wrong-brand context is rejected.
+- Drafts have an explicit per-post Approve & schedule control. Scheduled mode only when explicitly enabled in that workspace's settings. The tool never publishes immediately.
 - Unit and SQLite MCP integration tests.
 
 ## Setup
@@ -27,7 +28,7 @@ Maintain an independent, rolling **14-day** content calendar for each explicitly
 
 ## Recommended ChatGPT task prompt
 
-> Each morning, use the Meta Manager tools to call get_strategist_brief. Process only enabled accounts. For each account, call get_account_dashboard and research_content using that account's exact account_id. Consult its independent profile, avoid prohibited claims, and check every uncovered platform/date slot. Prepare relevant original copy and an approved media URL when the platform requires it. Call strategist_queue_post with account_id, platform, local_date, title, caption, hashtags and media URL for each valid slot. Never cross-use business details or creative between workspaces. Never schedule a duplicate slot. Draft mode means drafts for approval; schedule mode means the workspace owner has authorized scheduling. Do not publish immediately. Report gaps caused by missing media, disconnected accounts or publishing failures. Never report that a post was scheduled unless the tool confirms it.
+> Each morning, use the Meta Manager tools to call get_strategist_brief. Process only enabled accounts. For each account, call get_account_dashboard and research_content using that account's exact account_id. Consult its independent profile, avoid prohibited claims, and check every uncovered platform/date slot. Prepare relevant original copy and an approved media URL when the platform requires it. Call strategist_queue_post with the account's exact profile_fingerprint, account_id, platform, local_date, title, caption, hashtags and media URL for each valid slot. Never cross-use business details or creative between workspaces. Never schedule a duplicate slot. Draft mode means drafts for approval; schedule mode means the workspace owner has authorized scheduling. Do not publish immediately. Report gaps caused by missing media, disconnected accounts or publishing failures. Never report that a post was scheduled unless the tool confirms it.
 
 ## Operational limitations
 
