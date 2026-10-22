@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=%h
-ExecStart=/usr/bin/node /usr/lib/Meta Manager/resources/meta-manager-mcp.cjs
+ExecStart=/usr/bin/node "/usr/lib/Meta Manager/resources/meta-manager-mcp.cjs"
 Restart=on-failure
 RestartSec=20
 
