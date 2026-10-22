@@ -56,8 +56,9 @@ test("disabled and disconnected destinations cannot be queued", async () => {
       account_id:"a",platform:"facebook",local_date:"2099-01-01",title:"Post",caption:"New copy",
     }),/disabled/);
     h.configure("b",{...base,platforms:["instagram"]});
+    const brandB=(await h.calls.get_strategist_brief({account_id:"b"})).accounts[0];
     await assert.rejects(h.calls.strategist_queue_post({
-      account_id:"b",platform:"instagram",local_date:"2099-01-01",title:"Post",caption:"New copy",media_url:"https://example.com/image.jpg",
+      account_id:"b",profile_fingerprint:brandB.profileFingerprint,platform:"instagram",local_date:"2099-01-01",title:"Post",caption:"New copy",media_url:"https://example.com/image.jpg",
     }),/Destination not enabled/);
   } finally {h.close();}
 });
@@ -72,7 +73,7 @@ test("AI queue uses only selected brand and reserves same slot against repeat wr
     const a=brief.accounts.find((b)=>b.accountId==="a");
     const b=brief.accounts.find((b)=>b.accountId==="b");
     const gapA=a.coverage.gaps[0], gapB=b.coverage.gaps[0];
-    const input={account_id:"a",platform:"facebook",local_date:gapA.localDate,
+    const input={account_id:"a",profile_fingerprint:a.profileFingerprint,platform:"facebook",local_date:gapA.localDate,
       title:"A bakery post",caption:"Only bakery facts"};
     const first=await h.calls.strategist_queue_post(input);
     assert.equal(first.accountId,"a");
@@ -80,7 +81,7 @@ test("AI queue uses only selected brand and reserves same slot against repeat wr
     assert.equal(first.scheduledFor,null);
     await assert.rejects(h.calls.strategist_queue_post(input),/No eligible empty slot/);
     const queuedB=await h.calls.strategist_queue_post({
-      ...input, account_id:"b",local_date:gapB.localDate,title:"A law office post",caption:"Only law office facts",
+      ...input, account_id:"b",profile_fingerprint:b.profileFingerprint,local_date:gapB.localDate,title:"A law office post",caption:"Only law office facts",
     });
     assert.equal(queuedB.status,"scheduled");
     const c=h.db();
@@ -111,7 +112,23 @@ test("existing manual schedule prevents duplicate AI slot", async () => {
         .run("manual","a","Already there","facebook","scheduled",gap.scheduledFor);
     } finally { c.close(); }
     await assert.rejects(h.calls.strategist_queue_post({
-      account_id:"a",platform:"facebook",local_date:gap.localDate,title:"Duplicate",caption:"No thanks",
+      account_id:"a",profile_fingerprint:brief.accounts[0].profileFingerprint,platform:"facebook",local_date:gap.localDate,title:"Duplicate",caption:"No thanks",
     }),/No eligible empty slot/);
+  } finally { h.close(); }
+});
+
+test("a brand fingerprint cannot be reused against a different client", async () => {
+  const h=harness();
+  try {
+    h.configure("a",base);
+    h.configure("b",{...base,platforms:["facebook"]});
+    const overview=await h.calls.get_strategist_brief({});
+    const a=overview.accounts.find((x)=>x.accountId==="a");
+    const b=overview.accounts.find((x)=>x.accountId==="b");
+    assert.notEqual(a.profileFingerprint,b.profileFingerprint);
+    await assert.rejects(h.calls.strategist_queue_post({
+      account_id:"b", profile_fingerprint:a.profileFingerprint,platform:"facebook",
+      local_date:b.coverage.gaps[0].localDate,title:"Wrong",caption:"Do not mix clients",
+    }),/Brand profile has changed or belongs to another account/);
   } finally { h.close(); }
 });
