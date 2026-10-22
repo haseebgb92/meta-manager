@@ -23,6 +23,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
 import StrategistPage from "./StrategistPage";
+import PostMediaPreview, { PostMediaThumbnail } from "./PostMediaPreview";
 
 import {
   getCloudStatus, cloudSendCode, cloudVerifyCode, cloudConnectExisting, cloudConnectAccount,
@@ -385,39 +386,59 @@ function App() {
   useEffect(() => {
     if (!["Overview", "Calendar", "Content", "Published"].includes(activeNav)) return;
     let cancelled = false;
-    const refreshCalendar = () => getCalendar(selectedAccountId)
-      .then((items) => { if (!cancelled) { setCalendarItems(items); calendarLoadedKey.current = selectedAccountId ?? "all"; } })
-      .catch(() => { if (!cancelled) setCalendarItems([]); });
-    refreshCalendar();
-    const timer = window.setInterval(refreshCalendar, 10_000);
+    // The preview is read-only. Don't refresh and repaint the entire calendar
+    // underneath an open modal, or allow overlapping network requests.
+    if (viewingCalendarItem) return;
+    let refreshing = false;
+    const refreshCalendar = async () => {
+      if (refreshing || cancelled || document.hidden) return;
+      refreshing = true;
+      try {
+        const items = await getCalendar(selectedAccountId);
+        if (!cancelled) {
+          setCalendarItems((current) => JSON.stringify(current) === JSON.stringify(items) ? current : items);
+          calendarLoadedKey.current = selectedAccountId ?? "all";
+        }
+      } catch { /* Retain the last good calendar instead of clearing on transient errors. */ }
+      finally { refreshing = false; }
+    };
+    void refreshCalendar();
+    const timer = window.setInterval(() => void refreshCalendar(), 30_000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [selectedAccountId, activeNav]);
+  }, [selectedAccountId, activeNav, viewingCalendarItem]);
 
   useEffect(() => {
     if (!cloudStatus?.signedIn) return;
     if (!["Overview", "Calendar", "Content", "Published", "Accounts"].includes(activeNav)) return;
+    if (viewingCalendarItem) return;
     let cancelled = false;
-    const refreshCloud = () => {
-      void cloudListPosts().then((posts) => {
+    let refreshing = false;
+    const refreshCloud = async () => {
+      if (refreshing || cancelled || document.hidden) return;
+      refreshing = true;
+      try {
+        const posts = await cloudListPosts();
         if (!cancelled) {
-          setCloudPosts(posts);
+          setCloudPosts((current) => JSON.stringify(current) === JSON.stringify(posts) ? current : posts);
           setCloudCalendarError("");
         }
-      }).catch((error) => {
+      } catch (error) {
         if (!cancelled) setCloudCalendarError("Cloud calendar could not sync: " + String(error));
-      });
+      } finally { refreshing = false; }
     };
-    refreshCloud();
-    const timer = window.setInterval(refreshCloud, 15_000);
+    void refreshCloud();
+    const timer = window.setInterval(() => void refreshCloud(), 60_000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [cloudStatus?.signedIn, activeNav, selectedAccountId]);
+  }, [cloudStatus?.signedIn, activeNav, selectedAccountId, viewingCalendarItem]);
 
   useEffect(() => {
-    const refresh = () => getMcpStatus().then(setMcpStatus).catch(() => setMcpStatus(null));
+    const refresh = () => { if (!document.hidden && !viewingCalendarItem) getMcpStatus()
+      .then((result) => setMcpStatus((current) => JSON.stringify(current) === JSON.stringify(result) ? current : result))
+      .catch(() => null); };
     refresh();
-    const timer = window.setInterval(refresh, 5000);
+    const timer = window.setInterval(refresh, 30_000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [viewingCalendarItem]);
 
   useEffect(() => {
     if (activeNav !== "Analytics") return;
@@ -1079,7 +1100,7 @@ function App() {
                 <article className="card upcoming-card">
                   <div className="card-head compact"><div><h2>Recent Published Content</h2></div><button className="link-btn" onClick={() => setActiveNav("Published")}>View all <ChevronRight size={15}/></button></div>
                   <div className="post-list">
-                    {recentLivePosts.map((post) => <div className="post-row live-post-row" key={`${post.platform}-${post.id}`}><div className="post-thumb live-thumb" style={post.mediaUrl ? { backgroundImage: `url(${post.mediaUrl})` } : undefined}>{!post.mediaUrl ? <Image size={17}/> : null}</div><span><b>{post.caption || `${post.platform} post`}</b><small>{post.createdAt ? new Date(post.createdAt).toLocaleDateString() : "Recently published"} · {post.likes} likes · {post.comments} comments</small></span><i className={post.platform === "instagram" ? "platform-pill ig" : "platform-pill fb"}>{post.platform === "instagram" ? "IG" : "FB"}</i></div>)}
+                    {recentLivePosts.map((post) => <div className="post-row live-post-row" key={`${post.platform}-${post.id}`}><PostMediaThumbnail className="post-thumb live-thumb" url={post.mediaUrl} platform={post.platform} /><span><b>{post.caption || `${post.platform} post`}</b><small>{post.createdAt ? new Date(post.createdAt).toLocaleDateString() : "Recently published"} · {post.likes} likes · {post.comments} comments</small></span><i className={post.platform === "instagram" ? "platform-pill ig" : "platform-pill fb"}>{post.platform === "instagram" ? "IG" : "FB"}</i></div>)}
                   </div>
                 </article>
                 <article className="card ai-card"><div className="card-head compact"><div><h2><WandSparkles size={18}/> Content Workflow</h2></div></div><div className="recommendation"><div className="ai-art"><Sparkles size={20}/></div><span><b>Create your next post</b><small>Draft or schedule content locally for the selected workspace.</small></span><button onClick={() => { setActiveNav("Content"); setShowComposer(true); }}>Create</button></div></article>
@@ -1092,8 +1113,8 @@ function App() {
           <section className="page-panel">
             <div className="page-title-row"><div><span className="eyebrow">RECENT SOCIAL CONTENT</span><h2>Recent Published</h2><p>{selectedLinkedInAccount ? "LinkedIn posts published through Social Manager. LinkedIn does not grant historical personal-post reading with the current permission tier." : "Latest Facebook and Instagram posts from the selected workspace, plus LinkedIn posts published through this app."}</p></div><span className={`sync-badge ${loadingLive ? "loading" : ""}`}>{loadingLive && !selectedLinkedInAccount ? "Loading…" : `${publishedCount} recent`}</span></div>
             <div className="published-grid">
-              {(liveDashboard?.recentPosts ?? []).map((post) => <article className="card published-card" key={`${post.platform}-${post.id}`}><div className="published-media" style={post.mediaUrl ? {backgroundImage:`url(${post.mediaUrl})`} : undefined}>{!post.mediaUrl ? <Image size={26}/> : null}</div><div className="published-copy"><div><i className={post.platform === "instagram" ? "platform-pill ig" : "platform-pill fb"}>{post.platform === "instagram" ? "IG" : "FB"}</i><small>{post.createdAt ? new Date(post.createdAt).toLocaleString() : ""}</small></div><p>{post.caption || "Published post"}</p><footer><span>♥ {post.likes}</span><span>● {post.comments}</span></footer></div></article>)}
-              {localPublishedItems.map((item) => <article className={`card published-card ${item.platform === "linkedin" ? "linkedin-published-card" : ""}`} key={`local-${item.id}`}><div className={`published-media ${item.platform === "linkedin" ? "linkedin-media" : ""}`} style={item.mediaUrl ? {backgroundImage:`url(${item.mediaUrl})`} : undefined}>{item.platform === "linkedin" ? <span>in</span> : !item.mediaUrl ? <Image size={26}/> : null}</div><div className="published-copy"><div><i className={`platform-pill ${item.platform === "linkedin" ? "li" : item.platform === "instagram" ? "ig" : "fb"}`}>{item.platform === "linkedin" ? "LI" : item.platform === "instagram" ? "IG" : item.platform === "facebook" ? "FB" : "META"}</i><small>{item.publishedAt ? new Date(item.publishedAt).toLocaleString() : "Published"}</small></div><p>{item.caption || item.title}</p><footer><span>Published via Social Manager</span></footer></div></article>)}
+              {(liveDashboard?.recentPosts ?? []).map((post) => <article className="card published-card" key={`${post.platform}-${post.id}`}><PostMediaThumbnail className="published-media" url={post.mediaUrl} platform={post.platform} /><div className="published-copy"><div><i className={post.platform === "instagram" ? "platform-pill ig" : "platform-pill fb"}>{post.platform === "instagram" ? "IG" : "FB"}</i><small>{post.createdAt ? new Date(post.createdAt).toLocaleString() : ""}</small></div><p>{post.caption || "Published post"}</p><footer><span>♥ {post.likes}</span><span>● {post.comments}</span></footer></div></article>)}
+              {localPublishedItems.map((item) => <article className={`card published-card ${item.platform === "linkedin" ? "linkedin-published-card" : ""}`} key={`local-${item.id}`}><PostMediaThumbnail className={`published-media ${item.platform === "linkedin" ? "linkedin-media" : ""}`} url={item.mediaUrl} platform={item.platform} /><div className="published-copy"><div><i className={`platform-pill ${item.platform === "linkedin" ? "li" : item.platform === "instagram" ? "ig" : "fb"}`}>{item.platform === "linkedin" ? "LI" : item.platform.startsWith("instagram") ? "IG" : item.platform === "facebook" ? "FB" : "META"}</i><small>{item.publishedAt ? new Date(item.publishedAt).toLocaleString() : "Published"}</small></div><p>{item.caption || item.title}</p><footer><span>Published via Social Manager</span></footer></div></article>)}
               {!publishedCount ? <div className="empty-live roomy">No published content is available for this selection yet.</div> : null}
             </div>
           </section>
@@ -1120,7 +1141,7 @@ function App() {
             <div className="page-title-row"><div><span className="eyebrow">LOCAL + CLOUD PUBLISHING</span><h2>Content Calendar</h2><p>Local drafts and cloud-scheduled posts appear together. Cloud posting works when your computer is off.</p></div><button className="primary-page-button" onClick={() => setShowComposer(true)}><Plus size={16}/> New post</button></div>
             {cloudCalendarError ? <p className="live-error">{cloudCalendarError}</p> : null}
             <div className="calendar-toolbar"><div className="period-tabs"><button className={calendarView === "month" ? "selected" : ""} onClick={() => setCalendarView("month")}>Month</button><button className={calendarView === "week" ? "selected" : ""} onClick={() => setCalendarView("week")}>Week</button><button className={calendarView === "list" ? "selected" : ""} onClick={() => setCalendarView("list")}>List</button></div><b>{calendarView === "month" ? monthCalendar.label : calendarView === "week" ? "This week" : `${calendarDisplayItems.length} posts`}</b></div>
-            {calendarView === "month" && <div className="month-calendar card"><div className="month-head">{["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map((day)=><b key={day}>{day}</b>)}</div><div className="month-grid">{monthCalendar.cells.map((cell,index)=><div className={`month-cell ${cell.date ? "" : "empty"}`} key={index}>{cell.date ? <><span>{cell.date.getDate()}</span>{cell.items.slice(0,3).map((item)=><button key={item.id} className={`month-item ${item.status}`} title={item.title} onClick={() => setViewingCalendarItem(item)}><i>{item.platform === "instagram" ? "IG" : item.platform === "facebook" ? "FB" : item.platform === "linkedin" ? "LI" : "BOTH"}</i>{item.title}</button>)}</> : null}</div>)}</div></div>}
+            {calendarView === "month" && <div className="month-calendar card"><div className="month-head">{["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map((day)=><b key={day}>{day}</b>)}</div><div className="month-grid">{monthCalendar.cells.map((cell,index)=><div className={`month-cell ${cell.date ? "" : "empty"}`} key={index}>{cell.date ? <><span>{cell.date.getDate()}</span>{cell.items.slice(0,3).map((item)=><button key={item.id} className={`month-item ${item.status}`} title={item.title} onClick={() => setViewingCalendarItem(item)}><i>{item.platform.startsWith("instagram") ? "IG" : item.platform === "facebook" ? "FB" : item.platform === "linkedin" ? "LI" : "BOTH"}</i>{item.title}</button>)}</> : null}</div>)}</div></div>}
             {calendarView === "week" && <div className="week-calendar">{weekCalendar.map((day)=><article className="card week-day" key={day.date.toISOString()}><header><b>{day.date.toLocaleDateString(undefined,{weekday:"short"})}</b><span>{day.date.getDate()}</span></header>{day.items.map((item)=><button className="week-item week-item-button" key={item.id} onClick={() => setViewingCalendarItem(item)}><span className={`queue-status ${item.status}`}>{item.status}</span><b>{item.title}</b><small>{item.scheduledFor ? new Date(item.scheduledFor).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}) : "—"}</small></button>)}{!day.items.length ? <p>No posts</p> : null}</article>)}</div>}
             {calendarView === "list" && <div className="calendar-list-card card"><div className="calendar-list-head"><span>Status</span><span>Post</span><span>Platform</span><span>Schedule</span><span>Action</span></div>{calendarDisplayItems.map((item) => <div className="calendar-list-row" key={item.id}><span className={`queue-status ${item.status}`}>{item.status}</span><div><b>{item.title}</b><small>{item.caption || "No caption yet"}</small>{item.lastError ? <small className="cloud-post-error">{item.lastError}</small> : null}</div><i className="platform-text">{item.platform}</i><time>{item.scheduledFor ? new Date(item.scheduledFor).toLocaleString() : "—"}</time><div className="calendar-actions"><button className="view-action" onClick={() => setViewingCalendarItem(item)}>View</button>{["draft","scheduled","failed"].includes(item.status) ? <button disabled={publishingId === item.id} onClick={() => handlePublishNow(item)}>{publishingId === item.id ? "Publishing…" : "Publish now"}</button> : null}</div></div>)}{!calendarDisplayItems.length ? <div className="empty-live">No local or cloud posts are available for this account yet.</div> : null}</div>}
           </section>
@@ -1159,7 +1180,7 @@ function App() {
             {loadingMedia && !mediaItems.length ? <div className="media-grid">{Array.from({length:12}).map((_,index)=><article className="media-card card media-skeleton" key={index}><div/><footer><span/></footer></article>)}</div> : null}
             {mediaError ? <div className="live-error">{mediaError}</div> : null}
             {!loadingMedia && !mediaItems.length && !mediaError ? <div className="empty-live roomy">No media was returned for this selection.</div> : null}
-            <div className="media-grid">{mediaItems.map((post)=><article className="media-card card" key={`${post.platform}-${post.id}`}><a href={post.permalinkUrl || undefined} target="_blank" rel="noreferrer"><div style={{backgroundImage:`url(${post.mediaUrl})`}}/></a><footer><i className={post.platform === "instagram" ? "platform-pill ig" : "platform-pill fb"}>{post.platform === "instagram" ? "IG" : "FB"}</i><span>{post.caption || "Media post"}</span><small>{post.createdAt ? new Date(post.createdAt).toLocaleDateString() : ""}</small></footer></article>)}</div>
+            <div className="media-grid">{mediaItems.map((post)=><article className="media-card card" key={`${post.platform}-${post.id}`}><a href={post.permalinkUrl || undefined} target="_blank" rel="noreferrer"><PostMediaThumbnail className="media-thumb" url={post.mediaUrl} platform={post.platform} /></a><footer><i className={post.platform === "instagram" ? "platform-pill ig" : "platform-pill fb"}>{post.platform === "instagram" ? "IG" : "FB"}</i><span>{post.caption || "Media post"}</span><small>{post.createdAt ? new Date(post.createdAt).toLocaleDateString() : ""}</small></footer></article>)}</div>
           </section>
         )}
 
@@ -1293,7 +1314,7 @@ function App() {
             <div className="calendar-view-copy">{viewingCalendarItem.caption || "No caption yet."}</div>
             {viewingCalendarItem.hashtags.length ? <div className="calendar-view-tags">{viewingCalendarItem.hashtags.map((tag) => <span key={tag}>#{tag.replace(/^#/, "")}</span>)}</div> : null}
             {viewingCalendarItem.linkUrl ? <p><a href={viewingCalendarItem.linkUrl} target="_blank" rel="noreferrer">{viewingCalendarItem.linkUrl}</a></p> : null}
-            {viewingCalendarItem.mediaUrl ? <div className="calendar-view-media" style={{backgroundImage:`url(${viewingCalendarItem.mediaUrl})`}}/> : null}
+            <PostMediaPreview key={viewingCalendarItem.id} url={viewingCalendarItem.mediaUrl} platform={viewingCalendarItem.platform} />
             {viewingCalendarItem.lastError ? <div className="live-error">{viewingCalendarItem.lastError}</div> : null}
             <div className="composer-actions"><button className="secondary" onClick={() => setViewingCalendarItem(null)}>Close</button>{["draft","scheduled","failed"].includes(viewingCalendarItem.status) ? <button className="primary" disabled={publishingId === viewingCalendarItem.id} onClick={async () => { await handlePublishNow(viewingCalendarItem); setViewingCalendarItem(null); }}>{publishingId === viewingCalendarItem.id ? "Publishing…" : "Publish now"}</button> : null}</div>
           </section>
