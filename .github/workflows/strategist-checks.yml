@@ -40,5 +40,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Prepare Tauri build resources
+        run: npm run mcp:bundle
       - name: Compile Tauri commands and SQLite migrations
         run: cargo check --manifest-path src-tauri/Cargo.toml
