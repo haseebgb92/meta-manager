@@ -132,3 +132,9 @@ export function strategistCoverage({ profile, account, items = [], reservations 
   }
   return result;
 }
+
+// Keep enabled strategists first while preserving the original order inside each group.
+// Sorting a copy also protects the account list used elsewhere in the application.
+export function prioritizeActiveAccounts(items) {
+  return [...items].sort((left, right) => Number(Boolean(right.config?.enabled)) - Number(Boolean(left.config?.enabled)));
+}
