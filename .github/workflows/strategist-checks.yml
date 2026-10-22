@@ -48,5 +48,8 @@ jobs:
       - run: npm ci
       - name: Prepare Tauri build resources
         run: npm run mcp:bundle
+      - name: Prepare Windows Node runtime
+        shell: pwsh
+        run: ./scripts/prepare-windows-node.ps1
       - name: Compile Tauri commands and SQLite migrations
         run: cargo check --manifest-path src-tauri/Cargo.toml
