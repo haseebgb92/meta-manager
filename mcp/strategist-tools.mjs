@@ -30,8 +30,9 @@ export function registerStrategistTools(server, { db, getAccount, listAccounts, 
     const config = profile(c, account);
     const coverage = strategistCoverage({ profile: config, account, items: localItems(c, account.id),
       reservations: reserved(c, account.id), now });
+    const profileFingerprint = crypto.createHash("sha256").update(account.id + "\n" + JSON.stringify(config)).digest("hex").slice(0, 32);
     return {
-      accountId: account.id, accountName: account.name,
+      accountId: account.id, accountName: account.name, profileFingerprint,
       connectedDestinations: { facebookPageId: account.facebookPageId ?? null,
         instagramAccountId: account.instagramAccountId ?? null,
         linkedinWorkspace: account.status === "linkedin_connected" },
@@ -58,13 +59,13 @@ export function registerStrategistTools(server, { db, getAccount, listAccounts, 
   server.registerTool("strategist_queue_post", {
     description: "Create exactly one account-bound AI post for a missing planned date/platform. Draft by default; scheduled only if the human explicitly enabled schedule mode in that account's saved profile. Does not immediately publish. Enforces unique slot reservation, connected destination, profile, schedule and media constraints.",
     inputSchema: {
-      account_id: z.string(), platform: z.enum(["facebook", "instagram", "linkedin"]),
+      account_id: z.string(), profile_fingerprint: z.string().length(32), platform: z.enum(["facebook", "instagram", "linkedin"]),
       local_date: z.string(), title: z.string().min(1).max(160),
       caption: z.string().min(1).max(10000),
       hashtags: z.array(z.string()).max(30).optional(),
       media_url: z.string().url().optional(), link_url: z.string().url().optional(),
     },
-  }, async ({ account_id, platform, local_date, title, caption, hashtags = [], media_url, link_url }) => {
+  }, async ({ account_id, profile_fingerprint, platform, local_date, title, caption, hashtags = [], media_url, link_url }) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(local_date)) throw new Error("Invalid local date");
     const account = getAccount(account_id);
     if (!account) throw new Error("Unknown workspace");
@@ -78,6 +79,7 @@ export function registerStrategistTools(server, { db, getAccount, listAccounts, 
       c.exec("BEGIN IMMEDIATE");
       const b = brief(c, account, new Date());
       if (!b.profile.enabled) throw new Error("AI Strategist is disabled for this workspace");
+      if (profile_fingerprint !== b.profileFingerprint) throw new Error("Brand profile has changed or belongs to another account; refresh the strategist brief");
       if (!b.profile.platforms.includes(platform)) throw new Error("Destination not enabled in this workspace");
       const slot = b.coverage.gaps.find((g) => g.platform === platform && g.localDate === local_date);
       if (!slot) throw new Error("No eligible empty slot; already filled, reserved, or outside the 14-day calendar");
