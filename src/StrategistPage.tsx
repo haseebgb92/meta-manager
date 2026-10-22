@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { BrainCircuit, CalendarClock, CheckCircle2, Clipboard, RefreshCw, ShieldCheck } from "lucide-react";
 import type { LocalAccount, LocalCalendarItem, StrategistConfig, StrategistProfile, StrategistSlot } from "./localApi";
-import { getCalendar, listStrategistProfiles, listStrategistSlots, saveStrategistProfile } from "./localApi";
+import { getCalendar, listStrategistProfiles, listStrategistSlots, saveStrategistProfile, saveCalendarItem } from "./localApi";
 import { allowedPlatforms, normalizeProfile, strategistCoverage } from "../shared/strategist.mjs";
 import "./StrategistPage.css";
 
@@ -16,7 +16,7 @@ function strategyTask() {
     "For each enabled account_id, independently call get_account_dashboard and research_content for that exact account_id.",
     "Use ONLY that account's separate brand profile and connected destinations. Never mix client businesses, logos, offers, audiences, media or platform IDs.",
     "Check each uncovered platform/date slot and compose a factual, original post appropriate to that business.",
-    "For each valid gap call strategist_queue_post(account_id, platform, local_date, title, caption, hashtags and media_url when needed).",
+    "For each valid gap call strategist_queue_post with the exact profile_fingerprint returned for that account, account_id, platform, local_date, title, caption, hashtags and media_url when needed).",
     "Never generate the same slot twice. Never invent product details or promotions. Instagram requires publicly hosted HTTPS media; otherwise report the blocker.",
     "Leave posts as drafts unless the account owner has explicitly enabled schedule mode. Never call publish_post without explicit authorization.",
     "Report planned, pending approval, scheduled and blocked slots separately for each account.",
@@ -94,6 +94,35 @@ export default function StrategistPage({ accounts }: { accounts: LocalAccount[] 
       const saved = await saveStrategistProfile(selected.id, normalized);
       setProfiles((previous) => ({ ...previous, [selected.id]: saved.config }));
       setMessage("Saved for " + selected.name + ". Other accounts were not changed.");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function approveSlot(slot: { itemId?: string; platform: string; scheduledFor: string }) {
+    if (!selected || !slot.itemId) return;
+    const item = calendar.find((p) => p.id === slot.itemId);
+    if (!item || item.accountId !== selected.id || item.platform !== slot.platform || item.status !== "draft") {
+      setError("AI draft no longer belongs to this brand and destination. Refresh coverage.");
+      return;
+    }
+    if (Date.parse(slot.scheduledFor) <= Date.now()) {
+      setError("Planned time has passed. Review posting settings before approving.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      await saveCalendarItem({
+        id: item.id, accountId: selected.id, title: item.title, platform: item.platform,
+        status: "scheduled", caption: item.caption, hashtags: item.hashtags,
+        mediaUrl: item.mediaUrl, linkUrl: item.linkUrl, scheduledFor: slot.scheduledFor,
+      });
+      await refresh();
+      setMessage("Approved and scheduled for " + selected.name + ". Cloud delivery requires a separately connected cloud queue.");
     } catch (e) {
       setError(String(e));
     } finally {
@@ -216,6 +245,19 @@ export default function StrategistPage({ accounts }: { accounts: LocalAccount[] 
               <div className="strategist-slot-list">
                 {(selectedCoverage?.audit.gaps ?? []).slice(0, 14).map((slot) =>
                   <div key={slot.platform + slot.localDate}><span>{slot.localDate} · {slot.platform}</span><small>Content needed</small></div>)}
+                {(selectedCoverage?.audit.pending ?? []).map((slot) => {
+                  const item = calendar.find((p) => p.id === slot.itemId);
+                  return (
+                    <div key={"pending-" + slot.platform + slot.localDate} className="strategist-pending-row">
+                      <span><strong>{item?.title ?? "Pending AI draft"}</strong>
+                        <small>{slot.localDate} · {slot.platform} · {item?.caption?.slice(0, 170) ?? "No caption"}</small>
+                      </span>
+                      <button className="secondary" disabled={saving || !item} onClick={() => void approveSlot(slot)}>
+                        Approve & schedule
+                      </button>
+                    </div>
+                  );
+                })}
                 {selectedCoverage?.config.enabled && !selectedCoverage.audit.gaps.length &&
                   <p>No uncovered future slots for this account.</p>}
                 {!selectedCoverage?.config.enabled && <p>Save an enabled strategist profile to start checking for content gaps.</p>}
