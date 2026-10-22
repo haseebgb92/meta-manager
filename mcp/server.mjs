@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import * as z from "zod/v4";
+import { registerStrategistTools } from "./strategist-tools.mjs";
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import os from "node:os";
@@ -549,6 +550,7 @@ function getServer() {
   });
 
   server.registerTool("upload_cloud_video",{description:"Upload an MP4 video in Downloads to cloud media hosting, confirm required",inputSchema:{file_path:z.string(),confirm:z.boolean()}},async({file_path,confirm})=>{if(!confirm)throw new Error("Confirmation required");return textResult(await uploadCloudVideo(file_path));});
+  registerStrategistTools(server, { db, getAccount, listAccounts, httpsUrl, textResult, z });
   server.registerTool("list_accounts", { description: "List Meta Manager workspaces and linked Facebook/Instagram IDs without exposing tokens.", inputSchema: {} }, async()=>textResult(listAccounts()));
   server.registerTool("get_account_dashboard", { description: "Get live audience data and recent posts for one workspace or all connected workspaces.", inputSchema: { account_id: z.string().optional() } }, async({account_id})=>{
     const accounts = account_id ? [getAccount(account_id)].filter(Boolean) : listAccounts().filter((a)=>a.status==="connected");

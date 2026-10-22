@@ -1,0 +1,55 @@
+name: AI Strategist checks
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: strategist-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-and-mcp:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Test isolated coverage and time zone logic
+        run: npm run test:strategist
+      - name: Typecheck and compile desktop UI
+        run: npm run build
+      - name: Bundle ChatGPT MCP extensions
+        run: npm run mcp:bundle
+      - name: Check MCP tool JavaScript syntax
+        run: node --check mcp/server.mjs
+
+  rust-check:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Prepare Tauri build resources
+        run: npm run mcp:bundle
+      - name: Prepare Windows Node runtime
+        shell: pwsh
+        run: ./scripts/prepare-windows-node.ps1
+      - name: Compile Tauri commands and SQLite migrations
+        run: cargo check --manifest-path src-tauri/Cargo.toml
