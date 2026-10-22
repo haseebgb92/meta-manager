@@ -367,3 +367,40 @@ export function onInstagramOAuthError(callback: (message: string) => void) {
   if (!isDesktop()) return Promise.resolve(() => {});
   return listen<string>("instagram-oauth-error", (event) => callback(event.payload));
 }
+
+export type StrategistConfig = {
+  enabled: boolean;
+  platforms: string[];
+  weekdays: number[];
+  timeLocal: string;
+  timezone: string;
+  bufferDays: number;
+  mode: "draft" | "schedule";
+  website: string;
+  description: string;
+  audience: string;
+  tone: string;
+  pillars: string;
+  avoid: string;
+};
+
+export type StrategistProfile = { accountId: string; config: StrategistConfig };
+export type StrategistSlot = {
+  accountId: string;
+  platform: string;
+  localDate: string;
+  calendarItemId: string;
+};
+
+export async function listStrategistProfiles(): Promise<StrategistProfile[]> {
+  if (!isDesktop()) return [];
+  return invoke<StrategistProfile[]>("list_strategist_profiles");
+}
+export async function listStrategistSlots(): Promise<StrategistSlot[]> {
+  if (!isDesktop()) return [];
+  return invoke<StrategistSlot[]>("list_strategist_slots");
+}
+export async function saveStrategistProfile(accountId: string, config: StrategistConfig): Promise<StrategistProfile> {
+  if (!isDesktop()) throw new Error("Requires the Meta Manager desktop app");
+  return invoke<StrategistProfile>("save_strategist_profile", { accountId, config });
+}
