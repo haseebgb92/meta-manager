@@ -50,7 +50,7 @@ export function registerStrategistTools(server, { db, getAccount, listAccounts, 
       const accounts = account_id ? [getAccount(account_id)].filter(Boolean) : listAccounts();
       if (account_id && accounts.length === 0) throw new Error("Workspace not found");
       const all = accounts.map((a) => brief(c, a, new Date())).filter((b) => b.profile.enabled);
-      return textResult({ generatedAt: new Date().toISOString(), bufferDays: 14,
+      return textResult({ generatedAt: new Date().toISOString(), bufferDays: 7,
         accounts: all, disabledCount: accounts.length - all.length,
         workflow: "For each enabled account: call get_account_dashboard and research_content with that same account_id; build original content according to its separate brand profile; for each gap call strategist_queue_post with the exact account_id, platform and local_date. Never call publish_post without explicit user approval. The initial mode is draft only. Cloud scheduling is a separate step requiring permitted cloud connections and confirmation." });
     } finally { c.close(); }
@@ -82,7 +82,7 @@ export function registerStrategistTools(server, { db, getAccount, listAccounts, 
       if (profile_fingerprint !== b.profileFingerprint) throw new Error("Brand profile has changed or belongs to another account; refresh the strategist brief");
       if (!b.profile.platforms.includes(platform)) throw new Error("Destination not enabled in this workspace");
       const slot = b.coverage.gaps.find((g) => g.platform === platform && g.localDate === local_date);
-      if (!slot) throw new Error("No eligible empty slot; already filled, reserved, or outside the 14-day calendar");
+      if (!slot) throw new Error("No eligible empty slot; already filled, reserved, or outside the 7-day calendar");
       const id = crypto.randomUUID();
       const schedule = b.profile.mode === "schedule";
       c.prepare("INSERT INTO calendar_items (id,account_id,title,platform,status,caption,hashtags,media_url,link_url,scheduled_for,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")

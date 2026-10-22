@@ -1,0 +1,8 @@
+[Unit]
+Description=Meta Manager 7-day content queue preflight and on-demand wake
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.local/lib/meta-manager/overnight_preflight.py
+TimeoutStartSec=90

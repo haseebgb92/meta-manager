@@ -1,0 +1,11 @@
+[Unit]
+Description=ChatGPT MCP Bridge on demand for overnight Meta Manager workflow
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart="/opt/MCP Bridge/mcp-bridge"
+Restart=on-failure
+RestartSec=20
+
+# Starts on demand only, when graphical session is available.

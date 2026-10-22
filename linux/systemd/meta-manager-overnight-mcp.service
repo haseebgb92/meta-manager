@@ -1,0 +1,12 @@
+[Unit]
+Description=Headless Meta Manager local MCP service if desktop/bridge are absent
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h
+ExecStart=/usr/bin/node /usr/lib/Meta Manager/resources/meta-manager-mcp.cjs
+Restart=on-failure
+RestartSec=20
+
+# Starts on demand only, and never touches calendar write actions by itself.

@@ -6,7 +6,7 @@ export const DEFAULT_STRATEGIST = Object.freeze({
   weekdays: [1, 2, 3, 4, 5, 6, 7],
   timeLocal: "10:00",
   timezone: "Asia/Karachi",
-  bufferDays: 14,
+  bufferDays: 7,
   mode: "draft",
   website: "",
   description: "",
@@ -35,7 +35,7 @@ export function normalizeProfile(profile, account) {
     .filter((d) => Number.isInteger(d) && d >= 1 && d <= 7).sort((a, b) => a - b);
   data.timeLocal = typeof data.timeLocal === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(data.timeLocal)
     ? data.timeLocal : DEFAULT_STRATEGIST.timeLocal;
-  data.bufferDays = 14;
+  data.bufferDays = 7;
   data.mode = data.mode === "schedule" ? "schedule" : "draft";
   try { new Intl.DateTimeFormat("en-US", { timeZone: data.timezone }).format(); }
   catch { data.timezone = DEFAULT_STRATEGIST.timezone; }
