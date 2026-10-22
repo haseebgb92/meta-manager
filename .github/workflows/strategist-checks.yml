@@ -24,6 +24,8 @@ jobs:
       - run: npm ci
       - name: Test isolated coverage and time zone logic
         run: npm run test:strategist
+      - name: Test scheduled-post media rendering rules
+        run: npm run test:media
       - name: Typecheck and compile desktop UI
         run: npm run build
       - name: Bundle ChatGPT MCP extensions
