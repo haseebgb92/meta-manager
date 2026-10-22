@@ -112,7 +112,7 @@ export function strategistCoverage({ profile, account, items = [], reservations 
         localDate: day, timeLocal: config.timeLocal, timezone: config.timezone,
         scheduledFor: plannedIso };
       const matching = items.find((item) => item.accountId === account.id &&
-        ["scheduled", "published"].includes(item.status) &&
+        ["scheduled", "published", "cloud_scheduled", "cloud_published"].includes(item.status) &&
         itemDestinations(item).includes(platform) &&
         item.scheduledFor && localDate(item.scheduledFor, config.timezone) === day);
       if (matching) { result.covered.push({ ...slot, itemId: matching.id }); continue; }
