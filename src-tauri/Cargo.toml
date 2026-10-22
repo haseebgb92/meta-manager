@@ -1,6 +1,6 @@
 [package]
 name = "meta-manager"
-version = "0.1.33"
+version = "0.1.34"
 description = "Local-first Meta social publishing and analytics manager"
 authors = ["Advertpreneur"]
 license = ""

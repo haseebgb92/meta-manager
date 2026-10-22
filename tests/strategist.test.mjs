@@ -61,3 +61,16 @@ test("enabled accounts appear first without changing disabled order or mutating 
   assert.deepEqual(ordered.map((x) => x.account.id), ["linkedin", "instagram", "disabled-1", "disabled-2"]);
   assert.deepEqual(items.map((x) => x.account.id), ["disabled-1", "linkedin", "disabled-2", "instagram"]);
 });
+
+test("native Instagram Reels prevent duplicate feed slots, while Stories do not", () => {
+  const a = strategistCoverage({ profile: setting, account: facebook, now });
+  const spot = a.gaps.find((slot) => slot.platform === "instagram" && slot.localDate === "2026-10-23");
+  assert.ok(spot);
+  const reel = { id: "native-reel", accountId: facebook.id, platform: "instagram_reel", status: "cloud_scheduled", scheduledFor: spot.scheduledFor };
+  const filled = strategistCoverage({ profile: setting, account: facebook, items: [reel], now });
+  assert.equal(filled.covered.filter((x) => x.platform === "instagram").length, 1);
+  assert.equal(filled.gaps.length, a.gaps.length - 1);
+  const story = { ...reel, platform: "instagram_story", id: "story" };
+  const stillOpen = strategistCoverage({ profile: setting, account: facebook, items: [story], now });
+  assert.ok(stillOpen.gaps.find((x) => x.platform === "instagram" && x.localDate === "2026-10-23"));
+});

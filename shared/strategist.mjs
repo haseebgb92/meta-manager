@@ -92,6 +92,9 @@ function weekDay(day) {
 }
 function itemDestinations(item) {
   if (item.platform === "both") return ["facebook", "instagram"];
+  // A Reel fills the Instagram feed slot; a Story does not.
+  // Without this, the next strategist run may wrongly queue a second Instagram post.
+  if (item.platform === "instagram_reel") return ["instagram"];
   return [item.platform];
 }
 
