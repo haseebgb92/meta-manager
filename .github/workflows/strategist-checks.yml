@@ -1,13 +1,14 @@
 name: AI Strategist checks
 
 on:
-  push:
-    branches:
-      - "feature/ai-strategist-*"
   pull_request:
     branches:
       - main
   workflow_dispatch:
+
+concurrency:
+  group: strategist-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   frontend-and-mcp:
