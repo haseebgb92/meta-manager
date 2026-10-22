@@ -117,6 +117,20 @@ fn save_calendar_item(
 }
 
 #[tauri::command]
+fn list_strategist_profiles(app: tauri::AppHandle) -> Result<Vec<db::StrategistProfile>, String> {
+    db::list_strategist_profiles(&app)
+}
+
+#[tauri::command]
+fn save_strategist_profile(
+    app: tauri::AppHandle,
+    account_id: String,
+    config: serde_json::Value,
+) -> Result<db::StrategistProfile, String> {
+    db::save_strategist_profile(&app, account_id, config)
+}
+
+#[tauri::command]
 fn get_linkedin_status(app: tauri::AppHandle) -> Result<linkedin::LinkedInStatus, String> {
     linkedin::get_status(&app)
 }
@@ -418,6 +432,8 @@ pub fn run() {
             add_account,
             list_calendar,
             save_calendar_item,
+            list_strategist_profiles,
+            save_strategist_profile,
             get_meta_config_status,
             get_linkedin_status,
             save_linkedin_personal_secret,
