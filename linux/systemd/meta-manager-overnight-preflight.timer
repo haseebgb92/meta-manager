@@ -1,0 +1,12 @@
+[Unit]
+Description=Wake Meta Manager and audit the 7-day content calendar before ChatGPT's midnight task
+
+[Timer]
+OnCalendar=*-*-* 00:05:00
+OnStartupSec=5min
+Persistent=true
+AccuracySec=30s
+Unit=meta-manager-overnight-preflight.service
+
+[Install]
+WantedBy=timers.target

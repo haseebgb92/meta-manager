@@ -1,0 +1,11 @@
+[Unit]
+Description=Meta Manager desktop on demand for overnight content workflow
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/meta-manager
+Restart=on-failure
+RestartSec=10
+
+# Do not enable at boot: the overnight preflight starts this only if absent.

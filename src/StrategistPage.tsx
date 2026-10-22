@@ -11,7 +11,7 @@ const WEEKDAYS = [
 
 function strategyTask() {
   return [
-    "Each morning run the Meta Manager AI Strategist for the next 14 days.",
+    "Every night after midnight (00:15 Asia/Karachi) run the Meta Manager AI Strategist for the next 7 days.",
     "Call get_strategist_brief. Work ONLY on explicitly enabled accounts.",
     "For each enabled account_id, independently call get_account_dashboard and research_content for that exact account_id.",
     "Use ONLY that account's separate brand profile and connected destinations. Never mix client businesses, logos, offers, audiences, media or platform IDs.",
@@ -155,7 +155,7 @@ export default function StrategistPage({ accounts }: { accounts: LocalAccount[] 
         <div>
           <span className="eyebrow">ACCOUNT-SAFE CONTENT AUTOMATION</span>
           <h2><BrainCircuit size={25} /> AI Strategist</h2>
-          <p>Maintain a rolling 14-day calendar for selected brands. Every setting and destination is isolated by workspace ID.</p>
+          <p>Maintain a rolling 7-day calendar for selected brands. Every setting and destination is isolated by workspace ID.</p>
         </div>
         <button className="secondary" disabled={loading} onClick={() => void refresh()}>
           <RefreshCw size={16}/> {loading ? "Refreshing..." : "Refresh coverage"}
@@ -166,7 +166,7 @@ export default function StrategistPage({ accounts }: { accounts: LocalAccount[] 
         <article className="card"><strong>{enabledCount}</strong><span>Enabled accounts</span></article>
         <article className="card"><strong>{openCount}</strong><span>Open posting slots</span></article>
         <article className="card"><strong>{pendingCount}</strong><span>AI drafts awaiting approval</span></article>
-        <article className="card"><strong>14 days</strong><span>Rolling content horizon</span></article>
+        <article className="card"><strong>7 days</strong><span>Rolling content horizon</span></article>
       </div>
 
       <div className="strategist-layout">
