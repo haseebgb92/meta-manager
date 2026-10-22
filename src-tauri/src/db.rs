@@ -98,6 +98,22 @@ fn conn(app: &AppHandle) -> Result<Connection, String> {
                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
              );
+             CREATE TABLE IF NOT EXISTS strategist_profiles (
+               account_id TEXT PRIMARY KEY,
+               config_json TEXT NOT NULL,
+               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+               FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
+             );
+             CREATE TABLE IF NOT EXISTS strategist_slots (
+               account_id TEXT NOT NULL,
+               platform TEXT NOT NULL,
+               local_date TEXT NOT NULL,
+               calendar_item_id TEXT NOT NULL,
+               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+               PRIMARY KEY (account_id,platform,local_date),
+               FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+               FOREIGN KEY(calendar_item_id) REFERENCES calendar_items(id) ON DELETE CASCADE
+             );
              CREATE TABLE IF NOT EXISTS settings (
                key TEXT PRIMARY KEY,
                value TEXT NOT NULL,
@@ -639,4 +655,84 @@ pub fn mark_calendar_publishing(app: &AppHandle, id: &str) -> Result<(), String>
         return Err("Post is not available for publishing".into());
     }
     Ok(())
+}
+
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategistProfile {
+    pub account_id: String,
+    pub config: serde_json::Value,
+}
+
+pub fn list_strategist_profiles(app: &AppHandle) -> Result<Vec<StrategistProfile>, String> {
+    let connection = conn(app)?;
+    let mut stmt = connection.prepare(
+        "SELECT account_id,config_json FROM strategist_profiles ORDER BY account_id"
+    ).map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], |row| {
+        let account_id: String = row.get(0)?;
+        let raw: String = row.get(1)?;
+        Ok((account_id,raw))
+    }).map_err(|e| e.to_string())?;
+    let mut profiles = Vec::new();
+    for row in rows {
+        let (account_id, raw) = row.map_err(|e| e.to_string())?;
+        let config = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+        profiles.push(StrategistProfile { account_id, config });
+    }
+    Ok(profiles)
+}
+
+pub fn save_strategist_profile(
+    app: &AppHandle,
+    account_id: String,
+    config: serde_json::Value,
+) -> Result<StrategistProfile, String> {
+    let account = get_account(app, &account_id)?.ok_or("Workspace not found")?;
+    if !config.is_object() { return Err("Invalid strategist configuration".into()); }
+    let enabled = config["enabled"].as_bool().ok_or("enabled must be a boolean")?;
+    let platforms = config["platforms"].as_array().ok_or("Select platforms")?;
+    let allowed: Vec<&str> = if account.status == "linkedin_connected" {
+        vec!["linkedin"]
+    } else {
+        let mut channels = Vec::new();
+        if account.facebook_page_id.is_some() { channels.push("facebook"); }
+        if account.instagram_account_id.is_some() { channels.push("instagram"); }
+        channels
+    };
+    if platforms.iter().any(|p| p.as_str().map(|v| !allowed.contains(&v)).unwrap_or(true)) {
+        return Err("Selected platform does not belong to this workspace".into());
+    }
+    let weekdays = config["weekdays"].as_array().ok_or("Select posting days")?;
+    if weekdays.iter().any(|d| d.as_u64().map(|v| !(1..=7).contains(&v)).unwrap_or(true)) {
+        return Err("Invalid posting day".into());
+    }
+    let time = config["timeLocal"].as_str().ok_or("Invalid posting time")?;
+    let valid_time = chrono::NaiveTime::parse_from_str(time, "%H:%M").is_ok();
+    if !valid_time { return Err("Invalid posting time".into()); }
+    let mode = config["mode"].as_str().unwrap_or("draft");
+    if mode != "draft" && mode != "schedule" { return Err("Invalid AI autonomy mode".into()); }
+    let timezone = config["timezone"].as_str().ok_or("Time zone required")?;
+    if timezone.is_empty() || timezone.len() > 128 || !timezone.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '-' | '+')) {
+        return Err("Invalid time zone".into());
+    }
+    for field in ["website","description","audience","tone","pillars","avoid"] {
+        if config[field].as_str().map(|s| s.len() > 4000).unwrap_or(true) {
+            return Err(format!("Invalid {field}"));
+        }
+    }
+    if enabled && (platforms.is_empty() || weekdays.is_empty() ||
+        config["description"].as_str().unwrap_or("").trim().len() < 10 ||
+        config["audience"].as_str().unwrap_or("").trim().is_empty()) {
+        return Err("Set a business description, audience, platforms and posting days before enabling AI".into());
+    }
+    let connection = conn(app)?;
+    connection.execute(
+        "INSERT INTO strategist_profiles(account_id,config_json,updated_at)
+         VALUES(?1,?2,CURRENT_TIMESTAMP)
+         ON CONFLICT(account_id) DO UPDATE SET config_json=excluded.config_json,updated_at=CURRENT_TIMESTAMP",
+        params![account_id,config.to_string()],
+    ).map_err(|e| e.to_string())?;
+    Ok(StrategistProfile { account_id, config })
 }
