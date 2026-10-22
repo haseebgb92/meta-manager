@@ -52,3 +52,6 @@
 .strategist-pending-row>span { display:flex; flex-direction:column; gap:4px; flex:1; min-width:160px; }
 .strategist-pending-row small { color:var(--text-muted,#788397); font-size:11px; line-height:1.45; }
 .strategist-pending-row button { padding:8px 12px; white-space:nowrap; }
+
+.strategist-account-group { margin:12px 4px 3px; padding-top:11px; border-top:1px solid var(--line,#d9deea); color:var(--text-muted,#788397); font-size:11px; font-weight:700; letter-spacing:.055em; text-transform:uppercase; }
+.strategist-account-group:first-of-type { margin-top:3px; padding-top:0; border-top:0; }

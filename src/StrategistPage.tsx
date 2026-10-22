@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { BrainCircuit, CalendarClock, CheckCircle2, Clipboard, RefreshCw, ShieldCheck } from "lucide-react";
 import type { LocalAccount, LocalCalendarItem, StrategistConfig, StrategistProfile, StrategistSlot } from "./localApi";
 import { getCalendar, listStrategistProfiles, listStrategistSlots, saveStrategistProfile, saveCalendarItem } from "./localApi";
-import { allowedPlatforms, normalizeProfile, strategistCoverage } from "../shared/strategist.mjs";
+import { allowedPlatforms, normalizeProfile, strategistCoverage, prioritizeActiveAccounts } from "../shared/strategist.mjs";
 import "./StrategistPage.css";
 
 const WEEKDAYS = [
@@ -27,6 +27,8 @@ function strategyTask() {
 export default function StrategistPage({ accounts }: { accounts: LocalAccount[] }) {
   const [selectedId, setSelectedId] = useState<string>("");
   const [profiles, setProfiles] = useState<Record<string, StrategistConfig>>({});
+  const [profilesLoaded, setProfilesLoaded] = useState(false);
+  const userSelectedAccount = useRef(false);
   const [calendar, setCalendar] = useState<LocalCalendarItem[]>([]);
   const [slots, setSlots] = useState<StrategistSlot[]>([]);
   const [draft, setDraft] = useState<StrategistConfig | null>(null);
@@ -41,6 +43,7 @@ export default function StrategistPage({ accounts }: { accounts: LocalAccount[] 
     try {
       const [saved, items, reserved] = await Promise.all([listStrategistProfiles(), getCalendar(), listStrategistSlots()]);
       setProfiles(Object.fromEntries(saved.map((p: StrategistProfile) => [p.accountId, p.config])));
+      setProfilesLoaded(true);
       setCalendar(items);
       setSlots(reserved);
     } catch (e) {
@@ -52,8 +55,14 @@ export default function StrategistPage({ accounts }: { accounts: LocalAccount[] 
 
   useEffect(() => { void refresh(); }, []);
   useEffect(() => {
-    if (accounts.length && !accounts.some((a) => a.id === selectedId)) setSelectedId(accounts[0].id);
-  }, [accounts, selectedId]);
+    if (!accounts.length) { setSelectedId(""); return; }
+    if (profilesLoaded && !userSelectedAccount.current) {
+      const firstEnabled = accounts.find((a) => profiles[a.id]?.enabled);
+      setSelectedId(firstEnabled?.id ?? accounts[0].id);
+    } else if (!accounts.some((a) => a.id === selectedId)) {
+      setSelectedId(accounts[0].id);
+    }
+  }, [accounts, selectedId, profiles, profilesLoaded]);
 
   const selected = accounts.find((a) => a.id === selectedId);
   useEffect(() => {
@@ -70,6 +79,7 @@ export default function StrategistPage({ accounts }: { accounts: LocalAccount[] 
       audit: strategistCoverage({ profile: config, account, items: calendar, reservations: slots }),
     };
   }), [accounts, profiles, calendar, slots]);
+  const orderedCoverage = useMemo(() => prioritizeActiveAccounts(coverage), [coverage]);
   const enabledCount = coverage.filter((x) => x.config.enabled).length;
   const openCount = coverage.reduce((n, x) => n + x.audit.gaps.length, 0);
   const pendingCount = coverage.reduce((n, x) => n + x.audit.pending.length, 0);
@@ -163,16 +173,20 @@ export default function StrategistPage({ accounts }: { accounts: LocalAccount[] 
         <aside className="card strategist-accounts">
           <h3>Individual accounts</h3>
           <p>Automation is off until enabled and saved for each account.</p>
-          {accounts.map((account) => {
-            const audit = coverage.find((c) => c.account.id === account.id);
-            return (
-              <button key={account.id} className={selectedId === account.id ? "strategist-account selected" : "strategist-account"}
-                onClick={() => setSelectedId(account.id)}>
-                <span><strong>{account.name}</strong><small>{audit?.config.enabled ? "AI enabled" : "AI disabled"}</small></span>
-                <small>{audit?.config.enabled ? String(audit.audit.gaps.length) + " gaps" : "Off"}</small>
+          {orderedCoverage.map(({ account, config, audit }, index) => (
+            <Fragment key={account.id}>
+              {(index === 0 || orderedCoverage[index - 1].config.enabled !== config.enabled) && (
+                <div className="strategist-account-group">
+                  {config.enabled ? `AI enabled (${enabledCount})` : `Other accounts (${accounts.length - enabledCount})`}
+                </div>
+              )}
+              <button className={selectedId === account.id ? "strategist-account selected" : "strategist-account"}
+                onClick={() => { userSelectedAccount.current = true; setSelectedId(account.id); }}>
+                <span><strong>{account.name}</strong><small>{config.enabled ? "AI enabled" : "AI disabled"}</small></span>
+                <small>{config.enabled ? String(audit.gaps.length) + " gaps" : "Off"}</small>
               </button>
-            );
-          })}
+            </Fragment>
+          ))}
           {!accounts.length && <p>Connect a social account to configure a strategist.</p>}
         </aside>
 

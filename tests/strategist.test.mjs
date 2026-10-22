@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { allowedPlatforms, normalizeProfile, strategistCoverage, zonedScheduleIso } from "../shared/strategist.mjs";
+import { allowedPlatforms, normalizeProfile, strategistCoverage, zonedScheduleIso, prioritizeActiveAccounts } from "../shared/strategist.mjs";
 
 const facebook = { id: "brand-a", name: "Brand A", status: "connected", facebookPageId: "p1", instagramAccountId: "i1" };
 const other = { id: "brand-b", name: "Brand B", status: "connected", facebookPageId: "p2", instagramAccountId: "i2" };
@@ -48,4 +48,16 @@ test("cloud-scheduled items fill coverage without generating duplicates", () => 
   const b = strategistCoverage({ profile: setting, account: facebook, items: [existing], now });
   assert.equal(b.covered.length, 1);
   assert.equal(b.gaps.length, 27);
+});
+
+test("enabled accounts appear first without changing disabled order or mutating the source", () => {
+  const items = [
+    { account: { id: "disabled-1" }, config: { enabled: false } },
+    { account: { id: "linkedin" }, config: { enabled: true } },
+    { account: { id: "disabled-2" }, config: { enabled: false } },
+    { account: { id: "instagram" }, config: { enabled: true } },
+  ];
+  const ordered = prioritizeActiveAccounts(items);
+  assert.deepEqual(ordered.map((x) => x.account.id), ["linkedin", "instagram", "disabled-1", "disabled-2"]);
+  assert.deepEqual(items.map((x) => x.account.id), ["disabled-1", "linkedin", "disabled-2", "instagram"]);
 });
