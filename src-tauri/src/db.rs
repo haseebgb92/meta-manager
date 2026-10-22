@@ -736,3 +736,27 @@ pub fn save_strategist_profile(
     ).map_err(|e| e.to_string())?;
     Ok(StrategistProfile { account_id, config })
 }
+
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategistSlot {
+    pub account_id: String,
+    pub platform: String,
+    pub local_date: String,
+    pub calendar_item_id: String,
+}
+
+pub fn list_strategist_slots(app: &AppHandle) -> Result<Vec<StrategistSlot>, String> {
+    let connection = conn(app)?;
+    let mut stmt = connection.prepare(
+        "SELECT account_id,platform,local_date,calendar_item_id FROM strategist_slots"
+    ).map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], |row| Ok(StrategistSlot {
+        account_id: row.get(0)?,
+        platform: row.get(1)?,
+        local_date: row.get(2)?,
+        calendar_item_id: row.get(3)?,
+    })).map_err(|e| e.to_string())?;
+    rows.map(|r| r.map_err(|e| e.to_string())).collect()
+}
