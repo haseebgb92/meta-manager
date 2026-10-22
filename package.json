@@ -16,7 +16,7 @@
     "build:all": "npm run build && npm run mcp:bundle",
     "windows:prepare-node": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-windows-node.ps1",
     "windows:build": "npm run windows:prepare-node && tauri build --bundles nsis",
-    "test:strategist": "node --test tests/strategist.test.mjs"
+    "test:strategist": "node --test tests/strategist.test.mjs tests/strategist-mcp.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.0",
