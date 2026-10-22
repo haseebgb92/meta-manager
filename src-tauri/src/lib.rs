@@ -122,6 +122,11 @@ fn list_strategist_profiles(app: tauri::AppHandle) -> Result<Vec<db::StrategistP
 }
 
 #[tauri::command]
+fn list_strategist_slots(app: tauri::AppHandle) -> Result<Vec<db::StrategistSlot>, String> {
+    db::list_strategist_slots(&app)
+}
+
+#[tauri::command]
 fn save_strategist_profile(
     app: tauri::AppHandle,
     account_id: String,
@@ -433,6 +438,7 @@ pub fn run() {
             list_calendar,
             save_calendar_item,
             list_strategist_profiles,
+            list_strategist_slots,
             save_strategist_profile,
             get_meta_config_status,
             get_linkedin_status,
