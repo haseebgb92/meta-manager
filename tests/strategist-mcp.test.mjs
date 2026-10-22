@@ -35,7 +35,7 @@ function harness() {
     const c=db();
     try {
       c.exec("CREATE TABLE IF NOT EXISTS strategist_profiles(account_id TEXT PRIMARY KEY,config_json TEXT)");
-      c.prepare("INSERT OR REPLACE INTO strategist_profiles VALUES(?,?)").run(id,JSON.stringify(config));
+      c.prepare("INSERT OR REPLACE INTO strategist_profiles(account_id,config_json) VALUES(?,?)").run(id,JSON.stringify(config));
     } finally { c.close(); }
   };
   const close=()=>rmSync(folder,{recursive:true,force:true});
