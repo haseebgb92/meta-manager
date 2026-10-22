@@ -40,3 +40,12 @@ test("time-zone schedule is an unambiguous UTC timestamp", () => {
 test("disabled account never generates tasks", () => {
   assert.equal(strategistCoverage({ profile: { ...setting, enabled: false }, account: facebook, now }).gaps.length, 0);
 });
+
+test("cloud-scheduled items fill coverage without generating duplicates", () => {
+  const a = strategistCoverage({ profile: setting, account: facebook, now });
+  const existing = { id: "cloud1", accountId: facebook.id, platform: "facebook",
+    status: "cloud_scheduled", scheduledFor: a.gaps[0].scheduledFor };
+  const b = strategistCoverage({ profile: setting, account: facebook, items: [existing], now });
+  assert.equal(b.covered.length, 1);
+  assert.equal(b.gaps.length, 27);
+});
