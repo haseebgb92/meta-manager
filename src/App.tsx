@@ -22,6 +22,8 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
+import StrategistPage from "./StrategistPage";
+
 import {
   getCloudStatus, cloudSendCode, cloudVerifyCode, cloudConnectExisting, cloudConnectAccount,
   cloudScheduleItem, cloudListPosts, cloudUploadMedia, cloudUploadVideo, cloudLogout, cloudDisconnectAccount,
@@ -84,6 +86,7 @@ const nav = [
   ["Research", Search],
   ["Content", FileText],
   ["Calendar", CalendarDays],
+  ["AI Strategist", Sparkles],
   ["Published", Send],
   ["Analytics", BarChart3],
   ["Media", Image],
@@ -1004,6 +1007,8 @@ function App() {
             <button className="avatar-button"><CircleUserRound size={22}/></button>
           </div>
         </header>
+
+        {activeNav === "AI Strategist" && <StrategistPage accounts={localAccounts} />}
 
         {activeNav === "Overview" && (
           <>
