@@ -392,7 +392,7 @@ pub fn save_calendar_item(
     let id = input.id.unwrap_or_else(|| Uuid::new_v4().to_string());
 
     let connection = conn(app)?;
-    connection
+    let changed = connection
         .execute(
             "INSERT INTO calendar_items (
                 id,account_id,title,platform,status,caption,hashtags,media_url,link_url,scheduled_for,updated_at
@@ -407,7 +407,8 @@ pub fn save_calendar_item(
                 media_url=excluded.media_url,
                 link_url=excluded.link_url,
                 scheduled_for=excluded.scheduled_for,
-                updated_at=CURRENT_TIMESTAMP",
+                updated_at=CURRENT_TIMESTAMP
+             WHERE calendar_items.account_id=excluded.account_id AND calendar_items.platform=excluded.platform",
             params![
                 id,
                 account_id,
@@ -422,6 +423,9 @@ pub fn save_calendar_item(
             ],
         )
         .map_err(|e| e.to_string())?;
+    if changed != 1 {
+        return Err("Existing post cannot be transferred to another workspace or platform".into());
+    }
 
     get_calendar_item(app, &id)?
         .ok_or_else(|| "Saved calendar item could not be reloaded".to_string())
