@@ -60,7 +60,7 @@ async function instagram(p:CloudPost,token:string){
 async function linkedin(p:CloudPost,token:string){
  const author="urn:li:person:"+p.remote_account_id;
  let content:any=undefined;
- const headers={"Content-Type":"application/json","LinkedIn-Version":"202506","X-Restli-Protocol-Version":"2.0.0"};
+ const headers={"Content-Type":"application/json","LinkedIn-Version":"202610","X-Restli-Protocol-Version":"2.0.0"};
  if(p.media_url){
   const setup=await request("https://api.linkedin.com/rest/images?action=initializeUpload",token,{method:"POST",headers,body:JSON.stringify({initializeUploadRequest:{owner:author}})});
   const value=setup.data.value;
